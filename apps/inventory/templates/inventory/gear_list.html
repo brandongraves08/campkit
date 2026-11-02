@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Shared gear</title></head>
+<body><main><h1>Shared gear</h1><nav><a href="{% url 'inventory:pantry_list' %}">Pantry</a> <a href="{% url 'inventory:gear_create' %}">Add gear</a></nav>
+<p>Base weight: {{ weights.total_grams }} g ({{ weights.confirmed_grams }} g confirmed; {{ weights.estimated_grams }} g estimated)</p>
+<ul>{% for item in items %}<li>{{ item.name }} — {{ item.quantity }} × {% if item.weight_grams %}{{ item.weight_grams }} g{% else %}weight unknown{% endif %} — <strong>{{ item.get_verification_status_display }}</strong>
+{% if item.source %}<span>Source: {{ item.source }}{% if item.source_url %} (<a href="{{ item.source_url }}">details</a>){% endif %}</span>{% endif %}
+<a href="{% url 'inventory:gear_edit' item.pk %}">Edit</a>{% if item.verification_status == 'estimated' %}<form method="post" action="{% url 'inventory:gear_confirm' item.pk %}">{% csrf_token %}<button type="submit">Confirm details</button></form>{% endif %}<form method="post" action="{% url 'inventory:gear_delete' item.pk %}" onsubmit="return confirm('Delete this gear item?');">{% csrf_token %}<button type="submit">Delete</button></form></li>{% empty %}<li>No shared gear yet.</li>{% endfor %}</ul></main></body></html>

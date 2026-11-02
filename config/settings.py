@@ -14,6 +14,8 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "apps.households.apps.HouseholdsConfig",
+    "apps.audit.apps.AuditConfig",
+    "apps.inventory.apps.InventoryConfig",
 ]
 
 MIDDLEWARE = [

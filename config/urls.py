@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
-from django.urls import path
+from django.urls import include, path
 
 from apps.households import views
 
@@ -11,4 +11,5 @@ urlpatterns = [
     path("accounts/signup/", views.signup_without_invitation, name="signup"),
     path("accounts/signup/<uuid:token>/", views.accept_invitation, name="accept_invitation"),
     path("accounts/invitations/", views.create_invitation, name="create_invitation"),
+    path("inventory/", include("apps.inventory.urls")),
 ]
