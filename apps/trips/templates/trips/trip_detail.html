@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>{{ trip.name }} · CampKit</title></head>
+<body>
+  <main>
+    <p><a href="{% url 'trips:trip_list' %}">All trips</a></p>
+    <h1>{{ trip.name }}</h1>
+    <p>{{ trip.destination }} · {{ trip.start_date|default:"Dates not set" }} to {{ trip.end_date|default:"Dates not set" }}</p>
+    <p>Status: {{ trip.get_status_display }} · Party size: {{ trip.party_size }}</p>
+    {% if trip.conditions %}<p>Conditions: {{ trip.conditions }}</p>{% endif %}
+    <h2>Packed base weight</h2>
+    <p>Total {{ weights.total_grams }} g; confirmed {{ weights.confirmed_grams }} g; estimated {{ weights.estimated_grams }} g (includes estimates).</p>
+    <h2>Packing list</h2>
+    <ul>{% for entry, gear_item in gear %}
+      <li>{{ gear_item.name }} × {{ entry.quantity }} ({{ gear_item.total_weight_grams }} g each; {{ gear_item.get_verification_status_display }}) — {% if entry.packed %}packed{% else %}not packed{% endif %}
+        <form method="post" action="{% url 'trips:trip_gear_packed' trip.pk entry.pk %}">{% csrf_token %}<input type="hidden" name="packed" value="{% if entry.packed %}false{% else %}true{% endif %}"><button type="submit">{% if entry.packed %}Mark unpacked{% else %}Mark packed{% endif %}</button></form>
+      </li>
+    {% empty %}<li>No gear on the packing list.</li>{% endfor %}</ul>
+    <form method="post" action="{% url 'trips:trip_gear_add' trip.pk %}">{% csrf_token %}
+      <label>Add shared gear <select name="gear_item_id" required>{% for item in available_gear %}<option value="{{ item.pk }}">{{ item.name }} ({{ item.get_verification_status_display }})</option>{% endfor %}</select></label>
+      <label>Quantity <input type="number" name="quantity" min="1" value="1"></label><button type="submit">Add to packing list</button>
+    </form>
+    <h2>Meals</h2>
+    <p><a href="{% url 'meals:meal_list' trip.pk %}">Plan meals, reserve food, or reconcile leftovers</a></p>
+    {% if trip.status != "cancelled" %}<form method="post" action="{% url 'trips:trip_cancel' trip.pk %}">{% csrf_token %}<button type="submit">Cancel trip and release food</button></form>{% endif %}
+  </main>
+</body>
+</html>

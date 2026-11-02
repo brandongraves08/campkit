@@ -16,6 +16,8 @@ INSTALLED_APPS = [
     "apps.households.apps.HouseholdsConfig",
     "apps.audit.apps.AuditConfig",
     "apps.inventory.apps.InventoryConfig",
+    "apps.trips.apps.TripsConfig",
+    "apps.meals.apps.MealsConfig",
 ]
 
 MIDDLEWARE = [

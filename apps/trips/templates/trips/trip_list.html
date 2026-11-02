@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Trips · CampKit</title></head>
+<body>
+  <main>
+    <h1>Your trips</h1>
+    <ul>
+      {% for trip in trips %}
+        <li><a href="{% url 'trips:trip_detail' trip.pk %}">{{ trip.name }}</a> — {{ trip.get_status_display }}</li>
+      {% empty %}<li>No trips planned yet.</li>{% endfor %}
+    </ul>
+    <h2>Plan a trip</h2>
+    <form method="post">{% csrf_token %}{{ form.as_p }}<button type="submit">Create trip</button></form>
+  </main>
+</body>
+</html>

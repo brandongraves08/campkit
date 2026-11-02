@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Meals for {{ trip.name }} · CampKit</title></head>
+<body>
+  <main>
+    <p><a href="{% url 'trips:trip_detail' trip.pk %}">{{ trip.name }}</a></p>
+    <h1>Meal plan</h1>
+    <p>Trip status: {{ trip.get_status_display }}</p>
+    {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+    <ul>
+      {% for meal in meals %}
+        <li><strong>{{ meal.name }}</strong> ({{ meal.servings }} servings)
+          <ul>{% for ingredient in meal.ingredients.all %}<li>{{ ingredient.quantity }} {{ ingredient.unit }} {{ ingredient.pantry_item.name }} — {{ ingredient.pantry_item.get_verification_status_display }}</li>{% empty %}<li>No ingredients listed.</li>{% endfor %}</ul>
+          {% for reservation in meal.reservations.all %}<p>{{ reservation.quantity }} {{ reservation.pantry_item.unit }} reserved; status {{ reservation.get_status_display }}{% if reservation.status == "reconciled" %}; consumed {{ reservation.consumed_quantity }}{% endif %}</p>{% endfor %}
+        </li>
+      {% empty %}<li>No meals planned.</li>{% endfor %}
+    </ul>
+    <h2>Add a meal</h2>
+    <form method="post">{% csrf_token %}
+      <label>Meal name <input name="name" required maxlength="160"></label>
+      <label>Servings <input name="servings" type="number" min="1" value="1"></label>
+      <label>Ingredient <select name="pantry_item_id"><option value="">No ingredient</option>{% for item in pantry %}<option value="{{ item.pk }}">{{ item.name }} ({{ item.quantity }} {{ item.unit }}, {{ item.get_verification_status_display }})</option>{% endfor %}</select></label>
+      <label>Ingredient quantity <input name="quantity" type="number" min="0.001" step="0.001"></label>
+      <label>Notes <input name="notes"></label>
+      <button type="submit">Add meal</button>
+    </form>
+    {% if trip.status != "cancelled" and trip.status != "completed" %}
+      <form method="post" action="{% url 'meals:confirm_meal_plan' trip.pk %}">{% csrf_token %}<button type="submit">Confirm meal plan and reserve confirmed food</button></form>
+    {% endif %}
+    {% if trip.status == "confirmed" %}
+      <h2>After the trip</h2>
+      <form method="post" action="{% url 'meals:reconcile_trip_food' trip.pk %}">{% csrf_token %}
+        {% for meal in meals %}{% for reservation in meal.reservations.all %}{% if reservation.status == "reserved" %}
+          <label>{{ reservation.pantry_item.name }} reserved {{ reservation.quantity }} {{ reservation.pantry_item.unit }}; consumed
+            <input type="number" name="consumed_{{ reservation.pk }}" value="0" min="0" max="{{ reservation.quantity }}" step="0.001">
+          </label>
+        {% endif %}{% endfor %}{% endfor %}
+        <button type="submit">Record consumption and return leftovers</button>
+      </form>
+    {% endif %}
+  </main>
+</body>
+</html>

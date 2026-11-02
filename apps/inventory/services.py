@@ -1,4 +1,4 @@
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
@@ -161,6 +161,70 @@ def delete_pantry_item(*, actor, household, item_id):
 def list_pantry(*, actor, household):
     require_household_member(actor, household.pk)
     return PantryItem.objects.for_household(household)
+
+
+def get_gear_item(*, actor, household, item_id):
+    require_household_member(actor, household.pk)
+    return GearItem.objects.for_household(household).get(pk=item_id)
+
+
+def packed_gear_weight_totals(*, actor, household, entries):
+    require_household_member(actor, household.pk)
+    totals = {"estimated_grams": 0, "confirmed_grams": 0}
+    entries = list(entries)
+    gear_ids = {item_id for item_id, _quantity in entries}
+    gear = {str(item.pk): item for item in GearItem.objects.for_household(household).filter(pk__in=gear_ids)}
+    for item_id, quantity in entries:
+        item = gear.get(str(item_id))
+        if item is None:
+            raise PermissionDenied("Packed gear must belong to the trip household.")
+        key = "confirmed_grams" if item.verification_status == InventoryVerification.CONFIRMED else "estimated_grams"
+        totals[key] += item.total_weight_grams * quantity
+    totals["total_grams"] = totals["estimated_grams"] + totals["confirmed_grams"]
+    return totals
+
+
+def get_pantry_stock(*, actor, household, item_ids=None, for_update=False):
+    require_household_member(actor, household.pk)
+    items = PantryItem.objects.for_household(household)
+    if item_ids is not None:
+        items = items.filter(pk__in=item_ids)
+    if for_update:
+        items = items.select_for_update()
+    return {
+        str(item.pk): {
+            "id": item.pk, "name": item.name, "quantity": item.quantity, "unit": item.unit,
+            "verification_status": item.verification_status,
+        }
+        for item in items.order_by("pk")
+    }
+
+
+def record_pantry_reservation_change(*, actor, household, item_id, action, before, after):
+    require_household_member(actor, household.pk)
+    item = PantryItem.objects.for_household(household).get(pk=item_id)
+    from apps.audit.services import record_change
+    return record_change(actor=actor, household=household, object=item, action=action,
+                         before=before, after=after)
+
+
+@transaction.atomic
+def move_confirmed_pantry_stock(*, actor, household, item_id, delta, action):
+    """Apply an audited reservation/release/reconciliation movement to confirmed stock."""
+    require_household_member(actor, household.pk)
+    if action not in {"food_reserved", "food_reservation_released", "food_reconciled"}:
+        raise ValidationError("Unsupported confirmed pantry stock movement.")
+    item = PantryItem.objects.for_household(household).select_for_update().get(pk=item_id)
+    if item.verification_status != InventoryVerification.CONFIRMED:
+        raise ValidationError("Estimated pantry stock cannot be moved as guaranteed food.")
+    before = _snapshot(item)
+    item.quantity += delta
+    item.full_clean()
+    item.save(update_fields=["quantity", "updated_at"])
+    from apps.audit.services import record_change
+    record_change(actor=actor, household=household, object=item, action=action,
+                  before=before, after=_snapshot(item))
+    return item
 
 
 @transaction.atomic
