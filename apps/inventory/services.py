@@ -1,5 +1,8 @@
+from datetime import timedelta
+
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.households.permissions import require_household_member
@@ -10,6 +13,9 @@ from apps.inventory.models import (
     PantryItem,
     PriceObservation,
 )
+
+# Pantry items expiring inside this window are surfaced for planning.
+PANTRY_EXPIRY_WINDOW_DAYS = 7
 
 
 def _validate_scope(actor, household, data):
@@ -109,9 +115,18 @@ def delete_gear_item(*, actor, household, item_id):
     item.delete()
 
 
-def list_gear(*, actor, household):
+def list_gear(*, actor, household, query=""):
     require_household_member(actor, household.pk)
-    return GearItem.objects.for_household(household)
+    items = GearItem.objects.for_household(household)
+    query = str(query or "").strip()
+    if query:
+        items = items.filter(
+            Q(name__icontains=query)
+            | Q(category__icontains=query)
+            | Q(owner__icontains=query)
+            | Q(storage_location__icontains=query)
+        )
+    return items
 
 
 def weight_totals(*, actor, household):
@@ -164,9 +179,42 @@ def delete_pantry_item(*, actor, household, item_id):
     item.delete()
 
 
-def list_pantry(*, actor, household):
+def list_pantry(*, actor, household, query=""):
     require_household_member(actor, household.pk)
-    return PantryItem.objects.for_household(household)
+    items = PantryItem.objects.for_household(household)
+    query = str(query or "").strip()
+    if query:
+        items = items.filter(
+            Q(name__icontains=query)
+            | Q(storage_location__icontains=query)
+            | Q(source__icontains=query)
+        )
+    return items
+
+
+def expiring_pantry(*, actor, household, days=PANTRY_EXPIRY_WINDOW_DAYS):
+    """Items whose stored expiry date is inside the planning window (soonest first).
+
+    Estimated and confirmed rows are both returned; the caller must keep the
+    two states visibly distinct rather than collapsing them into one number.
+    """
+    require_household_member(actor, household.pk)
+    cutoff = timezone.localdate() + timedelta(days=max(int(days), 0))
+    return (
+        PantryItem.objects.for_household(household)
+        .filter(expiry_date__isnull=False, expiry_date__lte=cutoff)
+        .order_by("expiry_date", "name")
+    )
+
+
+def verification_backlog(*, actor, household):
+    """Estimated facts a household member still has to confirm."""
+    require_household_member(actor, household.pk)
+    gear = list(GearItem.objects.for_household(household)
+                .filter(verification_status=InventoryVerification.ESTIMATED).order_by("name"))
+    pantry = list(PantryItem.objects.for_household(household)
+                  .filter(verification_status=InventoryVerification.ESTIMATED).order_by("name"))
+    return {"gear": gear, "pantry": pantry, "total": len(gear) + len(pantry)}
 
 
 def get_pantry_item(*, actor, item_id, household=None):

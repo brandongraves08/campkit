@@ -1,2 +1,21 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>{{ title }}</title></head><body><main><h1>{{ title }}</h1><form method="post">{% csrf_token %}{{ form.as_p }}<button type="submit">Save</button></form><a href="{% url 'inventory:gear_list' %}">Cancel</a></main></body></html>
+{% extends "base.html" %}
+
+{% block title %}{{ title }} · CampKit{% endblock %}
+
+{% block content %}
+  <p><a href="{% url 'inventory:gear_list' %}">← Back to gear</a></p>
+  <div class="page-head">
+    <h1>{{ title }}</h1>
+    <p class="lede">New facts start as estimated until a household member confirms them. Keep the source when you have one.</p>
+  </div>
+  <div class="card auth-card">
+    <form method="post">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <div class="button-row">
+        <button class="button button-primary" type="submit">Save</button>
+        <a class="button" href="{% url 'inventory:gear_list' %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

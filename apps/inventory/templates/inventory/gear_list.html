@@ -1,7 +1,69 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Shared gear</title></head>
-<body><main><h1>Shared gear</h1><nav><a href="{% url 'inventory:pantry_list' %}">Pantry</a> <a href="{% url 'inventory:gear_create' %}">Add gear</a></nav>
-<p>Base weight: {{ weights.total_grams }} g ({{ weights.confirmed_grams }} g confirmed; {{ weights.estimated_grams }} g estimated)</p>
-<ul>{% for item in items %}<li>{{ item.name }} — {{ item.quantity }} × {% if item.weight_grams %}{{ item.weight_grams }} g{% else %}weight unknown{% endif %} — <strong>{{ item.get_verification_status_display }}</strong>
-{% if item.source %}<span>Source: {{ item.source }}{% if item.source_url %} (<a href="{{ item.source_url }}">details</a>){% endif %}</span>{% endif %}
-<a href="{% url 'inventory:gear_edit' item.pk %}">Edit</a>{% if item.verification_status == 'estimated' %}<form method="post" action="{% url 'inventory:gear_confirm' item.pk %}">{% csrf_token %}<button type="submit">Confirm details</button></form>{% endif %}<form method="post" action="{% url 'inventory:gear_delete' item.pk %}" onsubmit="return confirm('Delete this gear item?');">{% csrf_token %}<button type="submit">Delete</button></form></li>{% empty %}<li>No shared gear yet.</li>{% endfor %}</ul></main></body></html>
+{% extends "base.html" %}
+
+{% block title %}Shared gear · CampKit{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <h1>Shared gear</h1>
+    <p class="lede">Everything the household owns together, with who confirmed it and where the details came from.</p>
+  </div>
+
+  <div class="summary-strip" aria-label="Gear weight summary">
+    <p><strong>{{ weights.total_grams }} g</strong> base weight</p>
+    <p>{{ weights.confirmed_grams }} g confirmed</p>
+    <p>{{ weights.estimated_grams }} g estimated</p>
+  </div>
+  <p class="fine">Estimated weight is counted separately from confirmed weight; it is never presented as confirmed.</p>
+
+  <form class="search-form" method="get" role="search">
+    <label for="gear-search">Search gear
+      <input id="gear-search" type="search" name="q" value="{{ query }}" placeholder="Name, category, owner, or storage">
+    </label>
+    <button class="button" type="submit">Search</button>
+    <a class="button button-primary" href="{% url 'inventory:gear_create' %}">Add gear</a>
+  </form>
+
+  {% if items %}
+    <ul class="item-list">
+      {% for item in items %}
+        <li>
+          <div class="item-head">
+            <h2><a href="{% url 'inventory:gear_edit' item.pk %}">{{ item.name }}</a></h2>
+            {% include "partials/verification_badge.html" with status=item.verification_status %}
+            {% if item.category %}<span class="tag">{{ item.category }}</span>{% endif %}
+          </div>
+          <p class="item-body">
+            {{ item.quantity }} × {% if item.weight_grams %}{{ item.weight_grams }} g{% else %}weight unknown{% endif %}
+            {% if item.owner %} · owned by {{ item.owner }}{% endif %}
+            {% if item.storage_location %} · stored in {{ item.storage_location }}{% endif %}
+            {% if item.condition %} · {{ item.condition }}{% endif %}
+          </p>
+          <p class="provenance">
+            {% if item.source %}Source: {{ item.source }}{% if item.source_url %} (<a href="{{ item.source_url }}" rel="noreferrer noopener">details</a>){% endif %}{% else %}No source recorded.{% endif %}
+            · observed {{ item.observed_at|date:"j M Y" }}
+            {% if item.confidence %}· confidence {{ item.confidence }}{% endif %}
+            {% if item.verified_by %}· confirmed by {{ item.verified_by }} on {{ item.verified_at|date:"j M Y" }}{% endif %}
+          </p>
+          <div class="actions">
+            <a class="button" href="{% url 'inventory:gear_edit' item.pk %}">Edit</a>
+            {% if item.verification_status == "estimated" %}
+              <form class="inline-form" method="post" action="{% url 'inventory:gear_confirm' item.pk %}">
+                {% csrf_token %}
+                <button class="button button-primary" type="submit">Confirm details</button>
+              </form>
+            {% endif %}
+            <form class="inline-form" method="post" action="{% url 'inventory:gear_delete' item.pk %}" data-confirm="Delete this gear item from the household?">
+              {% csrf_token %}
+              <button class="button button-danger" type="submit">Delete</button>
+            </form>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="empty-state">{% if query %}No gear matches “{{ query }}”.{% else %}No gear yet.{% endif %}</p>
+    <div class="button-row">
+      <a class="button button-primary" href="{% url 'inventory:gear_create' %}">Add gear</a>
+    </div>
+  {% endif %}
+{% endblock %}

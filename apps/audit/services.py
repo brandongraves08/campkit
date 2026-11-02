@@ -22,3 +22,14 @@ def record_change(*, actor, household, object, action, before, after) -> Invento
         before=before,
         after=after,
     )
+
+
+def recent_changes(*, actor, household, limit=8):
+    """Household-scoped audit rows, newest first, for the overview screen."""
+    require_household_member(actor, household.pk)
+    limit = max(int(limit), 0)
+    return (
+        InventoryChange.objects.filter(household=household)
+        .select_related("actor")
+        .order_by("-created_at", "-id")[:limit]
+    )

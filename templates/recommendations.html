@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Recommendations · CampKit{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <h1>Recommendations</h1>
+    <p class="lede">Suggestions derived from this household's own trip, gear, pantry, and verification records. Each one names the records it came from.</p>
+  </div>
+
+  <p class="fine">Suggestions only — nothing here is inventory until a household member adds it.</p>
+
+  {% if recommendations %}
+    <div class="grid">
+      {% for recommendation in recommendations %}
+        <article class="card">
+          <h2>{{ recommendation.title }}</h2>
+          <p>{{ recommendation.detail }}</p>
+          <p class="provenance">Source: {{ recommendation.source }}</p>
+          {% if recommendation.action_url %}
+            <div class="button-row">
+              <a class="button button-primary" href="{{ recommendation.action_url }}">{{ recommendation.action_label }}</a>
+            </div>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="card">
+      <p class="empty-state">No recommendations right now.</p>
+      <p class="fine">Add a trip, shared gear, or pantry stock and CampKit will explain what needs attention.</p>
+      <div class="button-row">
+        <a class="button button-primary" href="{% url 'trips:trip_list' %}">Plan a trip</a>
+        <a class="button" href="{% url 'inventory:gear_list' %}">Add gear</a>
+      </div>
+    </div>
+  {% endif %}
+
+  <p class="meta">Recommendations are read-only. They never reserve, confirm, or create inventory.</p>
+{% endblock %}

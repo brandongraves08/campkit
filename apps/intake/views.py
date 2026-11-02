@@ -1,6 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
@@ -40,6 +40,7 @@ def _form_context(request):
 def intake_list(request):
     household = current_household(request)
     return render(request, "intake/list.html", {
+        "nav": "intake",
         "submissions": list_intake_submissions(actor=request.user, household=household),
         "verification_requests": list_verification_requests(actor=request.user, household=household),
     })
@@ -65,14 +66,14 @@ def intake_create(request):
             )
         except ValidationError as exc:
             return render(request, "intake/upload.html",
-                          {**_form_context(request), "error": _error_message(exc)}, status=400)
+                          {**_form_context(request), "nav": "intake", "error": _error_message(exc)}, status=400)
         schedule_intake_processing(submission.pk)
         if created:
             messages.info(request, "Upload stored privately and queued for review.")
         else:
             messages.info(request, "This photo or barcode was already submitted; showing the existing record.")
         return redirect("intake:detail", submission_id=submission.pk)
-    return render(request, "intake/upload.html", _form_context(request))
+    return render(request, "intake/upload.html", {**_form_context(request), "nav": "intake"})
 
 
 @login_required
@@ -81,6 +82,7 @@ def intake_detail(request, submission_id):
     submission = get_object_or_404(IntakeSubmission.objects.for_household(household), pk=submission_id)
     candidate = getattr(submission, "candidate", None)
     return render(request, "intake/detail.html", {
+        "nav": "intake",
         "submission": submission,
         "candidate": candidate,
         "evidence": candidate.field_evidence.all() if candidate is not None else [],
@@ -132,6 +134,6 @@ def intake_resolve(request, submission_id):
                 "note": request.POST.get("note", ""),
             },
         )
-    except (ValidationError, IntakeSubmission.DoesNotExist) as exc:
+    except (ValidationError, PermissionDenied, IntakeSubmission.DoesNotExist) as exc:
         messages.error(request, str(exc))
     return redirect("intake:detail", submission_id=submission_id)

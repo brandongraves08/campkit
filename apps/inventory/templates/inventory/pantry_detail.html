@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}{{ item.name }} · Pantry · CampKit{% endblock %}
+
+{% block content %}
+  <p><a href="{% url 'inventory:pantry_list' %}">← Back to pantry</a></p>
+  <div class="page-head">
+    <div class="item-head">
+      <h1>{{ item.name }}</h1>
+      {% include "partials/verification_badge.html" with status=item.verification_status %}
+    </div>
+    <p class="lede">
+      {% if item.verification_status == "confirmed" %}
+        {{ item.confirmed_quantity|floatformat:"-3" }} {{ item.unit }} confirmed and guaranteed for planning.
+      {% else %}
+        {{ item.estimated_quantity|floatformat:"-3" }} {{ item.unit }} estimated (not guaranteed stock).
+      {% endif %}
+    </p>
+  </div>
+
+  <div class="grid">
+    <section class="card" aria-labelledby="provenance-heading">
+      <h2 id="provenance-heading">Provenance</h2>
+      <p>Storage: {{ item.storage_location|default:"not recorded" }}</p>
+      <p>Expiry: {% if item.expiry_date %}{{ item.expiry_date|date:"j M Y" }}{% else %}not recorded{% endif %}</p>
+      <p>Source: {% if item.source %}{{ item.source }}{% else %}not recorded{% endif %}
+        {% if item.source_url %}· <a href="{{ item.source_url }}" rel="noreferrer noopener">source link</a>{% endif %}
+      </p>
+      <p>Observed: {{ item.observed_at|date:"j M Y H:i" }}</p>
+      <p>Confidence: {% if item.confidence %}{{ item.confidence }}{% else %}not stated{% endif %}</p>
+      <p>
+        {% if item.verified_by %}Confirmed by {{ item.verified_by }} on {{ item.verified_at|date:"j M Y H:i" }}
+        {% else %}No household member has confirmed this fact yet.{% endif %}
+      </p>
+      <div class="actions">
+        {% if item.verification_status == "estimated" %}
+          <form class="inline-form" method="post" action="{% url 'inventory:pantry_confirm' item.pk %}">
+            {% csrf_token %}
+            <button class="button button-primary" type="submit">Confirm quantity</button>
+          </form>
+        {% endif %}
+        <a class="button" href="{% url 'inventory:pantry_edit' item.pk %}">Edit or correct</a>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="nutrition-heading">
+      <h2 id="nutrition-heading">Nutrition facts</h2>
+      {% if nutrition %}
+        <div class="table-scroll">
+          <table>
+            <caption class="fine">Sourced values with confidence and observation time.</caption>
+            <thead><tr><th scope="col">Nutrient</th><th scope="col">Amount</th><th scope="col">Source</th><th scope="col">Verification</th><th scope="col">Confidence</th><th scope="col">Observed</th></tr></thead>
+            <tbody>
+              {% for fact in nutrition %}
+                <tr>
+                  <td>{{ fact.nutrient }}</td>
+                  <td>{{ fact.amount }} {{ fact.unit }}</td>
+                  <td>{{ fact.source }}{% if fact.source_url %} (<a href="{{ fact.source_url }}" rel="noreferrer noopener">source</a>){% endif %}</td>
+                  <td>{% include "partials/verification_badge.html" with status=fact.verification_status %}</td>
+                  <td>{{ fact.confidence|default:"not stated" }}</td>
+                  <td>{{ fact.observed_at }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty-state">No nutrition facts recorded yet.</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <section class="card" aria-labelledby="prices-heading">
+    <h2 id="prices-heading">Price history</h2>
+    {% if prices %}
+      <div class="table-scroll">
+        <table>
+          <caption class="fine">Dated observations only. Stale entries are labelled, never presented as current.</caption>
+          <thead><tr><th scope="col">Amount</th><th scope="col">Merchant</th><th scope="col">Source</th><th scope="col">Observed</th><th scope="col">Freshness</th></tr></thead>
+          <tbody>
+            {% for price in prices %}
+              <tr>
+                <td>{{ price.amount }} {{ price.currency }}</td>
+                <td>{{ price.merchant|default:"not recorded" }}</td>
+                <td>{{ price.source }}{% if price.source_url %} (<a href="{{ price.source_url }}" rel="noreferrer noopener">receipt</a>){% endif %}</td>
+                <td>{{ price.observed_at }}</td>
+                <td>{% if price.is_stale %}<span class="badge badge--estimated">stale</span>{% else %}<span class="badge badge--confirmed">current</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty-state">No price observations recorded yet.</p>
+    {% endif %}
+  </section>
+{% endblock %}

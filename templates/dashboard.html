@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}Household overview · CampKit{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <h1>Household overview</h1>
+    <p class="lede">What needs a decision next: the upcoming trip, shared gear and pantry stock, and the facts still waiting for a household member.</p>
+  </div>
+
+  <div class="grid">
+    <article class="card" aria-labelledby="next-trip-heading">
+      <h2 id="next-trip-heading">Next trip</h2>
+      {% if readiness %}
+        <h3><a href="{% url 'trips:trip_detail' readiness.trip.pk %}">{{ readiness.trip.name }}</a></h3>
+        <p class="meta">
+          {{ readiness.trip.destination|default:"Destination not set" }}
+          {% if readiness.trip.start_date %}· {{ readiness.trip.start_date|date:"j M Y" }}{% else %}· dates not set{% endif %}
+          {{ readiness.trip.end_date|date:"– j M Y" }}
+          · {{ readiness.trip.get_status_display }}
+        </p>
+        <p class="readiness">{{ readiness.packed_items }} of {{ readiness.total_items }} packed{% if readiness.days_until is not None %} · starts in {{ readiness.days_until }} day{{ readiness.days_until|pluralize }}{% endif %}</p>
+        <p class="weight-line">
+          <span><strong>{{ readiness.weights.confirmed_grams }} g confirmed</strong> <span class="badge badge--confirmed">Confirmed</span></span>
+          <span>{{ readiness.weights.estimated_grams }} g estimated <span class="badge badge--estimated">Estimated</span></span>
+        </p>
+        <p class="fine">Estimated weight is listed separately and is not confirmed gear weight.</p>
+        <div class="button-row">
+          <a class="button button-primary" href="{% url 'trips:trip_detail' readiness.trip.pk %}">Open trip</a>
+        </div>
+      {% else %}
+        <p class="empty-state">No trips planned yet.</p>
+        <div class="button-row">
+          <a class="button button-primary" href="{% url 'trips:trip_list' %}">Plan a trip</a>
+        </div>
+      {% endif %}
+    </article>
+
+    <article class="card" aria-labelledby="verification-heading">
+      <h2 id="verification-heading">Needs verification</h2>
+      {% if backlog.total %}
+        <p><strong>{{ backlog.total }}</strong> fact{{ backlog.total|pluralize }} awaiting household confirmation.</p>
+        <p class="fine">Only confirmed quantities count as guaranteed trip stock.</p>
+        <div class="button-row">
+          <a class="button button-primary" href="{% url 'inventory:verification_queue' %}">Review verification queue</a>
+        </div>
+      {% else %}
+        <p class="empty-state">No facts need verification.</p>
+      {% endif %}
+      <p class="meta">
+        {% if open_requests %}
+          {{ open_requests|length }} open intake question{{ open_requests|length|pluralize }}
+        {% else %}
+          No open intake questions
+        {% endif %}
+      </p>
+      <p><a href="{% url 'intake:list' %}">Open smart intake</a></p>
+    </article>
+  </div>
+
+  <div class="grid">
+    <article class="card" aria-labelledby="expiring-heading">
+      <h2 id="expiring-heading">Pantry to use first</h2>
+      {% if expiring %}
+        <ul class="item-list">
+          {% for item in expiring %}
+            <li>
+              <div class="item-head">
+                <a href="{% url 'inventory:pantry_detail' item.pk %}">{{ item.name }}</a>
+                {% include "partials/verification_badge.html" with status=item.verification_status %}
+              </div>
+              <p class="meta">Expires {{ item.expiry_date|date:"j M Y" }} · {{ item.quantity|floatformat:"-3" }} {{ item.unit }}</p>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="empty-state">No pantry items expiring in the next week.</p>
+      {% endif %}
+      <p class="fine">Expired or expiring within the next week, from the stored expiry dates; nothing is inferred.</p>
+    </article>
+
+    <article class="card" aria-labelledby="inventory-heading">
+      <h2 id="inventory-heading">Shared inventory</h2>
+      <p>
+        {% if gear_count %}{{ gear_count }} gear item{{ gear_count|pluralize }}{% else %}No gear yet{% endif %}
+        · {% if pantry_count %}{{ pantry_count }} pantry item{{ pantry_count|pluralize }}{% else %}No pantry items yet{% endif %}
+      </p>
+      <p class="fine">Food is private to the household and every row keeps its source and verification state.</p>
+      <div class="button-row">
+        <a class="button" href="{% url 'inventory:gear_list' %}">Open gear</a>
+        <a class="button" href="{% url 'inventory:pantry_list' %}">Open pantry</a>
+      </div>
+    </article>
+  </div>
+
+  <section aria-labelledby="recommendations-heading">
+    <div class="section-head">
+      <h2 id="recommendations-heading">Recommendations</h2>
+      {% if recommendation_total %}<a href="{% url 'recommendations' %}">See all {{ recommendation_total }} recommendation{{ recommendation_total|pluralize }}</a>{% endif %}
+    </div>
+    {% if recommendations %}
+      <div class="grid">
+        {% for recommendation in recommendations %}
+          <article class="card">
+            <h3>{{ recommendation.title }}</h3>
+            <p>{{ recommendation.detail }}</p>
+            <p class="provenance">Source: {{ recommendation.source }}</p>
+            {% if recommendation.action_url %}
+              <div class="button-row"><a class="button" href="{{ recommendation.action_url }}">{{ recommendation.action_label }}</a></div>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+      <p class="fine">Suggestions only — nothing here is inventory until a household member adds it.</p>
+    {% else %}
+      <p class="empty-state">No recommendations right now. Add a trip or inventory and CampKit will explain what needs attention.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="changes-heading">
+    <div class="section-head">
+      <h2 id="changes-heading">Recent changes</h2>
+    </div>
+    {% if recent_changes %}
+      <ul class="item-list">
+        {% for change in recent_changes %}
+          <li>
+            <p class="meta"><strong>{{ change.action }}</strong> · {{ change.object_type|default:"household record" }} · {{ change.actor }} · {{ change.created_at|date:"j M Y H:i" }}</p>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty-state">No changes recorded yet.</p>
+    {% endif %}
+  </section>
+{% endblock %}

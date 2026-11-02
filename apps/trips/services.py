@@ -1,5 +1,8 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
+
 from apps.households.permissions import require_household_member
 from apps.inventory.services import get_gear_item, packed_gear_weight_totals
 from apps.trips.models import Trip, TripGear
@@ -60,6 +63,43 @@ def trip_packing_list(*, trip_id, actor):
     entries = list(TripGear.objects.filter(trip=trip).order_by("pk"))
     return [(entry, get_gear_item(actor=actor, household=trip.household, item_id=entry.gear_item_id))
             for entry in entries]
+
+
+def list_trips(*, actor, household):
+    """Household-scoped trips, newest first, for the UI (never a model access)."""
+    require_household_member(actor, household.pk)
+    return Trip.objects.for_household(household).order_by("-created_at")
+
+
+def upcoming_trips(*, actor, household, limit=None):
+    """Planned/confirmed trips that have not finished yet, soonest first."""
+    require_household_member(actor, household.pk)
+    today = timezone.localdate()
+    trips = (
+        Trip.objects.for_household(household)
+        .filter(status__in=[Trip.Status.PLANNED, Trip.Status.CONFIRMED])
+        .filter(
+            Q(end_date__gte=today)
+            | Q(end_date__isnull=True, start_date__gte=today)
+            | Q(end_date__isnull=True, start_date__isnull=True)
+        )
+        .order_by("start_date", "created_at")
+    )
+    return trips[:limit] if limit else trips
+
+
+def trip_readiness(*, trip_id, actor):
+    """Packing progress and both weight bands for one trip."""
+    trip = get_trip_for_actor(trip_id, actor)
+    entries = list(TripGear.objects.filter(trip=trip).values_list("packed", flat=True))
+    days_until = (trip.start_date - timezone.localdate()).days if trip.start_date else None
+    return {
+        "trip": trip,
+        "total_items": len(entries),
+        "packed_items": sum(1 for packed in entries if packed),
+        "weights": packed_base_weight(trip_id=trip.pk, actor=actor),
+        "days_until": days_until,
+    }
 
 
 def set_trip_status(*, trip_id, status, actor):

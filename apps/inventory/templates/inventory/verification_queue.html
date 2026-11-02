@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Verification queue · CampKit{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <h1>Verification queue</h1>
+    <p class="lede">Facts a household member still has to confirm. Estimated rows stay visible but cannot be reserved as guaranteed trip stock.</p>
+  </div>
+
+  <p class="summary-strip"><strong>{{ backlog.total }}</strong>&nbsp;estimated fact{{ backlog.total|pluralize }} await confirmation</p>
+
+  <section aria-labelledby="pantry-backlog-heading">
+    <h2 id="pantry-backlog-heading">Estimated pantry</h2>
+    {% if backlog.pantry %}
+      <ul class="item-list">
+        {% for item in backlog.pantry %}
+          <li>
+            <div class="item-head">
+              <a href="{% url 'inventory:pantry_detail' item.pk %}">{{ item.name }}</a>
+              {% include "partials/verification_badge.html" with status=item.verification_status %}
+            </div>
+            <p class="meta">{{ item.estimated_quantity|floatformat:"-3" }} {{ item.unit }} estimated{% if item.source %} · source: {{ item.source }}{% endif %}</p>
+            <form class="inline-form" method="post" action="{% url 'inventory:pantry_confirm' item.pk %}">
+              {% csrf_token %}
+              <button class="button button-primary" type="submit">Confirm quantity</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty-state">No estimated pantry items.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="gear-backlog-heading">
+    <h2 id="gear-backlog-heading">Estimated gear</h2>
+    {% if backlog.gear %}
+      <ul class="item-list">
+        {% for item in backlog.gear %}
+          <li>
+            <div class="item-head">
+              <a href="{% url 'inventory:gear_edit' item.pk %}">{{ item.name }}</a>
+              {% include "partials/verification_badge.html" with status=item.verification_status %}
+            </div>
+            <p class="meta">{% if item.weight_grams %}{{ item.weight_grams }} g{% else %}weight unknown{% endif %}{% if item.source %} · source: {{ item.source }}{% endif %}</p>
+            <form class="inline-form" method="post" action="{% url 'inventory:gear_confirm' item.pk %}">
+              {% csrf_token %}
+              <button class="button button-primary" type="submit">Confirm details</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty-state">No estimated gear.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="intake-questions-heading">
+    <h2 id="intake-questions-heading">Open intake questions</h2>
+    {% if verification_requests %}
+      <ul class="item-list">
+        {% for request in verification_requests %}
+          <li>
+            <p><strong>{{ request.reason }}</strong></p>
+            <p class="meta">Fields: {{ request.field_names|join:", " }} · Hermes delivery: {{ request.get_hermes_status_display }}</p>
+            {% if request.submission_id %}
+              <div class="actions">
+                <a class="button button-primary" href="{% url 'intake:detail' request.submission_id %}">Review and correct</a>
+              </div>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty-state">No facts need verification.</p>
+    {% endif %}
+  </section>
+
+  <p class="fine">Confirming records your household account and time on the fact. A later material edit returns it to estimated.</p>
+{% endblock %}

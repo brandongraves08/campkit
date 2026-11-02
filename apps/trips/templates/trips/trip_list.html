@@ -1,16 +1,45 @@
-<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Trips · CampKit</title></head>
-<body>
-  <main>
+{% extends "base.html" %}
+
+{% block title %}Trips · CampKit{% endblock %}
+
+{% block content %}
+  <div class="page-head">
     <h1>Your trips</h1>
-    <ul>
+    <p class="lede">Plan a trip, build the packing checklist, and see how much of the weight is confirmed.</p>
+  </div>
+
+  {% if trips %}
+    <ul class="item-list">
       {% for trip in trips %}
-        <li><a href="{% url 'trips:trip_detail' trip.pk %}">{{ trip.name }}</a> — {{ trip.get_status_display }}</li>
-      {% empty %}<li>No trips planned yet.</li>{% endfor %}
+        <li>
+          <div class="item-head">
+            <h2><a href="{% url 'trips:trip_detail' trip.pk %}">{{ trip.name }}</a></h2>
+            <span class="tag">{{ trip.get_status_display }}</span>
+          </div>
+          <p class="meta">
+            {{ trip.destination|default:"Destination not set" }}
+            {% if trip.start_date %}· {{ trip.start_date|date:"j M Y" }}{% endif %}
+            {% if trip.end_date %}– {{ trip.end_date|date:"j M Y" }}{% endif %}
+            · party of {{ trip.party_size }}
+          </p>
+          {% if trip.conditions %}<p class="provenance">Conditions: {{ trip.conditions }}</p>{% endif %}
+        </li>
+      {% endfor %}
     </ul>
-    <h2>Plan a trip</h2>
-    <form method="post">{% csrf_token %}{{ form.as_p }}<button type="submit">Create trip</button></form>
-  </main>
-</body>
-</html>
+  {% else %}
+    <p class="empty-state">No trips planned yet.</p>
+  {% endif %}
+
+  <section aria-labelledby="plan-trip-heading">
+    <h2 id="plan-trip-heading">Plan a trip</h2>
+    <div class="card">
+      <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <div class="button-row">
+          <button class="button button-primary" type="submit">Create trip</button>
+        </div>
+      </form>
+    </div>
+  </section>
+{% endblock %}

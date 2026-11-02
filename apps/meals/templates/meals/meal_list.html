@@ -1,43 +1,95 @@
-<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Meals for {{ trip.name }} · CampKit</title></head>
-<body>
-  <main>
-    <p><a href="{% url 'trips:trip_detail' trip.pk %}">{{ trip.name }}</a></p>
+{% extends "base.html" %}
+
+{% block title %}Meals for {{ trip.name }} · CampKit{% endblock %}
+
+{% block content %}
+  <p><a href="{% url 'trips:trip_detail' trip.pk %}">← {{ trip.name }}</a></p>
+  <div class="page-head">
     <h1>Meal plan</h1>
-    <p>Trip status: {{ trip.get_status_display }}</p>
-    {% if error %}<p role="alert">{{ error }}</p>{% endif %}
-    <ul>
+    <p class="lede">Trip status: {{ trip.get_status_display }}. Estimated pantry stock must be confirmed before it can be reserved.</p>
+  </div>
+  {% if error %}<p role="alert" class="flash-list">{{ error }}</p>{% endif %}
+
+  {% if meals %}
+    <ul class="item-list">
       {% for meal in meals %}
-        <li><strong>{{ meal.name }}</strong> ({{ meal.servings }} servings)
-          <ul>{% for ingredient in meal.ingredients.all %}<li>{{ ingredient.quantity }} {{ ingredient.unit }} {{ ingredient.pantry_item.name }} — {{ ingredient.pantry_item.get_verification_status_display }}</li>{% empty %}<li>No ingredients listed.</li>{% endfor %}</ul>
-          {% for reservation in meal.reservations.all %}<p>{{ reservation.quantity }} {{ reservation.pantry_item.unit }} reserved; status {{ reservation.get_status_display }}{% if reservation.status == "reconciled" %}; consumed {{ reservation.consumed_quantity }}{% endif %}</p>{% endfor %}
+        <li>
+          <div class="item-head"><h2>{{ meal.name }}</h2><span class="tag">{{ meal.servings }} servings</span></div>
+          {% if meal.notes %}<p class="meta">{{ meal.notes }}</p>{% endif %}
+          <ul class="plain-list">
+            {% for ingredient in meal.ingredients.all %}
+              <li>{{ ingredient.quantity }} {{ ingredient.unit }} {{ ingredient.pantry_item.name }} — {{ ingredient.pantry_item.get_verification_status_display }}</li>
+            {% empty %}<li class="empty-state">No ingredients listed.</li>{% endfor %}
+          </ul>
+          {% for reservation in meal.reservations.all %}
+            <p class="provenance">{{ reservation.quantity }} {{ reservation.pantry_item.unit }} reserved; status {{ reservation.get_status_display }}{% if reservation.status == "reconciled" %}; consumed {{ reservation.consumed_quantity }}{% endif %}</p>
+          {% endfor %}
         </li>
-      {% empty %}<li>No meals planned.</li>{% endfor %}
+      {% endfor %}
     </ul>
-    <h2>Add a meal</h2>
-    <form method="post">{% csrf_token %}
-      <label>Meal name <input name="name" required maxlength="160"></label>
-      <label>Servings <input name="servings" type="number" min="1" value="1"></label>
-      <label>Ingredient <select name="pantry_item_id"><option value="">No ingredient</option>{% for item in pantry %}<option value="{{ item.pk }}">{{ item.name }} ({{ item.quantity }} {{ item.unit }}, {{ item.get_verification_status_display }})</option>{% endfor %}</select></label>
-      <label>Ingredient quantity <input name="quantity" type="number" min="0.001" step="0.001"></label>
-      <label>Notes <input name="notes"></label>
-      <button type="submit">Add meal</button>
+  {% else %}
+    <p class="empty-state">No meals planned.</p>
+  {% endif %}
+
+  <section class="card" aria-labelledby="add-meal-heading">
+    <h2 id="add-meal-heading">Add a meal</h2>
+    <form method="post">
+      {% csrf_token %}
+      <div class="field">
+        <label for="meal-name">Meal name</label>
+        <input id="meal-name" name="name" required maxlength="160">
+      </div>
+      <div class="field">
+        <label for="meal-servings">Servings</label>
+        <input id="meal-servings" name="servings" type="number" min="1" value="1">
+      </div>
+      <div class="field">
+        <label for="meal-ingredient">Ingredient</label>
+        <select id="meal-ingredient" name="pantry_item_id">
+          <option value="">No ingredient</option>
+          {% for item in pantry %}<option value="{{ item.pk }}">{{ item.name }} ({{ item.quantity }} {{ item.unit }}, {{ item.get_verification_status_display }})</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="meal-quantity">Ingredient quantity</label>
+        <input id="meal-quantity" name="quantity" type="number" min="0.001" step="0.001">
+      </div>
+      <div class="field">
+        <label for="meal-notes">Notes</label>
+        <input id="meal-notes" name="notes">
+      </div>
+      <div class="button-row">
+        <button class="button button-primary" type="submit">Add meal</button>
+      </div>
     </form>
-    {% if trip.status != "cancelled" and trip.status != "completed" %}
-      <form method="post" action="{% url 'meals:confirm_meal_plan' trip.pk %}">{% csrf_token %}<button type="submit">Confirm meal plan and reserve confirmed food</button></form>
-    {% endif %}
-    {% if trip.status == "confirmed" %}
-      <h2>After the trip</h2>
-      <form method="post" action="{% url 'meals:reconcile_trip_food' trip.pk %}">{% csrf_token %}
+  </section>
+
+  {% if trip.status != "cancelled" and trip.status != "completed" %}
+    <form class="card" method="post" action="{% url 'meals:confirm_meal_plan' trip.pk %}">
+      {% csrf_token %}
+      <h2>Confirm plan</h2>
+      <p class="fine">Confirmation reserves only confirmed pantry quantities; estimates stop the plan and ask for verification.</p>
+      <div class="button-row">
+        <button class="button button-primary" type="submit">Confirm meal plan and reserve confirmed food</button>
+      </div>
+    </form>
+  {% endif %}
+
+  {% if trip.status == "confirmed" %}
+    <section class="card" aria-labelledby="reconcile-heading">
+      <h2 id="reconcile-heading">After the trip</h2>
+      <form method="post" action="{% url 'meals:reconcile_trip_food' trip.pk %}">
+        {% csrf_token %}
         {% for meal in meals %}{% for reservation in meal.reservations.all %}{% if reservation.status == "reserved" %}
-          <label>{{ reservation.pantry_item.name }} reserved {{ reservation.quantity }} {{ reservation.pantry_item.unit }}; consumed
-            <input type="number" name="consumed_{{ reservation.pk }}" value="0" min="0" max="{{ reservation.quantity }}" step="0.001">
-          </label>
+          <div class="field">
+            <label for="consumed-{{ reservation.pk }}">{{ reservation.pantry_item.name }} reserved {{ reservation.quantity }} {{ reservation.pantry_item.unit }}; consumed</label>
+            <input id="consumed-{{ reservation.pk }}" type="number" name="consumed_{{ reservation.pk }}" value="0" min="0" max="{{ reservation.quantity }}" step="0.001">
+          </div>
         {% endif %}{% endfor %}{% endfor %}
-        <button type="submit">Record consumption and return leftovers</button>
+        <div class="button-row">
+          <button class="button button-primary" type="submit">Record consumption and return leftovers</button>
+        </div>
       </form>
-    {% endif %}
-  </main>
-</body>
-</html>
+    </section>
+  {% endif %}
+{% endblock %}

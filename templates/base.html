@@ -1,0 +1,52 @@
+{% load static %}<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>{% block title %}CampKit{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/campkit.css' %}">
+  </head>
+  <body class="{% block body_class %}{% endblock %}">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="{% url 'dashboard' %}">CampKit</a>
+        {% if user.is_authenticated and household %}
+          <p class="scope-note">Private to <strong>{{ household.name }}</strong>{% if household_role %} · {{ household_role }} access{% endif %}</p>
+          <nav class="site-nav" aria-label="Primary">
+            <ul>
+              <li><a href="{% url 'dashboard' %}"{% if nav == "overview" %} aria-current="page"{% endif %}>Overview</a></li>
+              <li><a href="{% url 'trips:trip_list' %}"{% if nav == "trips" %} aria-current="page"{% endif %}>Trips</a></li>
+              <li><a href="{% url 'inventory:gear_list' %}"{% if nav == "gear" %} aria-current="page"{% endif %}>Gear</a></li>
+              <li><a href="{% url 'inventory:pantry_list' %}"{% if nav == "pantry" %} aria-current="page"{% endif %}>Pantry</a></li>
+              <li><a href="{% url 'intake:list' %}"{% if nav == "intake" %} aria-current="page"{% endif %}>Smart intake</a></li>
+              <li><a href="{% url 'inventory:verification_queue' %}"{% if nav == "verification" %} aria-current="page"{% endif %}>Verification</a></li>
+              <li><a href="{% url 'recommendations' %}"{% if nav == "recommendations" %} aria-current="page"{% endif %}>Recommendations</a></li>
+            </ul>
+          </nav>
+          <form class="signout" method="post" action="{% url 'logout' %}">
+            {% csrf_token %}
+            <button class="link-button" type="submit">Sign out</button>
+          </form>
+        {% endif %}
+      </div>
+    </header>
+    {% if messages %}
+      <div class="shell">
+        <ul class="flash-list" role="status">
+          {% for message in messages %}<li>{{ message }}</li>{% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+    <main id="main" class="shell" tabindex="-1">
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="site-footer">
+      <div class="shell">
+        <p>CampKit keeps this household's records private. Estimates stay labelled until a household member confirms them.</p>
+      </div>
+    </footer>
+    <script src="{% static 'js/campkit.js' %}" defer></script>
+  </body>
+</html>

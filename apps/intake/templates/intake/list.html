@@ -1,10 +1,57 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Smart intake</title></head>
-<body><main><h1>Smart intake</h1><nav><a href="{% url 'intake:create' %}">Add a photo or barcode</a></nav>
-{% if messages %}<ul>{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul>{% endif %}
-<h2>Verification queue</h2>
-<ul>{% for request in verification_requests %}<li>{{ request.reason }} — fields: {{ request.field_names|join:", " }} — Hermes: {{ request.get_hermes_status_display }}
-{% if request.submission_id %}<a href="{% url 'intake:detail' request.submission_id %}">Review</a>{% endif %}</li>{% empty %}<li>No facts need verification.</li>{% endfor %}</ul>
-<h2>Submissions</h2>
-<ul>{% for submission in submissions %}<li><a href="{% url 'intake:detail' submission.pk %}">{{ submission }}</a> — {{ submission.get_status_display }}{% if submission.attempts %} — attempts: {{ submission.attempts }}{% endif %}{% if submission.failure_reason %} — {{ submission.failure_reason }}{% endif %}</li>{% empty %}<li>No photos or barcodes submitted yet.</li>{% endfor %}</ul>
-</main></body></html>
+{% extends "base.html" %}
+
+{% block title %}Smart intake · CampKit{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <h1>Smart intake</h1>
+    <p class="lede">Photos and barcodes become estimated records automatically only when confidence is high. Uncertain identity, quantity, nutrition, or allergens stop here for a household member to review.</p>
+  </div>
+
+  <div class="button-row">
+    <a class="button button-primary" href="{% url 'intake:create' %}">Add a photo or barcode</a>
+  </div>
+
+  <section aria-labelledby="queue-heading">
+    <h2 id="queue-heading">Verification queue</h2>
+    {% if verification_requests %}
+      <ul class="item-list">
+        {% for request in verification_requests %}
+          <li>
+            <p><strong>{{ request.reason }}</strong></p>
+            <p class="meta">Fields: {{ request.field_names|join:", " }} · Hermes delivery: {{ request.get_hermes_status_display }}</p>
+            {% if request.submission_id %}
+              <div class="actions">
+                <a class="button button-primary" href="{% url 'intake:detail' request.submission_id %}">Review and correct</a>
+              </div>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty-state">No facts need verification.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="submissions-heading">
+    <h2 id="submissions-heading">Submissions</h2>
+    {% if submissions %}
+      <ul class="item-list">
+        {% for submission in submissions %}
+          <li>
+            <div class="item-head">
+              <a href="{% url 'intake:detail' submission.pk %}">{{ submission }}</a>
+              <span class="tag">{{ submission.get_status_display }}</span>
+            </div>
+            <p class="meta">
+              {% if submission.attempts %}Attempts: {{ submission.attempts }} · {% endif %}
+              {% if submission.failure_reason %}{{ submission.failure_reason }}{% else %}Private original kept with the household.{% endif %}
+            </p>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty-state">No photos or barcodes submitted yet.</p>
+    {% endif %}
+  </section>
+{% endblock %}
