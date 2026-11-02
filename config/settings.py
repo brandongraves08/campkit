@@ -18,6 +18,7 @@ INSTALLED_APPS = [
     "apps.inventory.apps.InventoryConfig",
     "apps.trips.apps.TripsConfig",
     "apps.meals.apps.MealsConfig",
+    "apps.intake.apps.IntakeConfig",
 ]
 
 MIDDLEWARE = [
@@ -93,3 +94,26 @@ SECURE_HSTS_PRELOAD = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 X_FRAME_OPTIONS = "DENY"
+
+# Private photo/barcode intake. Uploads live outside static/media roots and are
+# served only through household-scoped views.
+INTAKE_UPLOAD_ROOT = Path(os.environ.get("CAMPKIT_INTAKE_UPLOAD_ROOT", BASE_DIR / "private" / "intake"))
+INTAKE_MAX_IMAGE_BYTES = int(os.environ.get("CAMPKIT_INTAKE_MAX_IMAGE_BYTES", 5 * 1024 * 1024))
+INTAKE_MAX_ATTEMPTS = int(os.environ.get("CAMPKIT_INTAKE_MAX_ATTEMPTS", 3))
+INTAKE_CONFIDENCE_THRESHOLDS = {
+    "identity": float(os.environ.get("CAMPKIT_INTAKE_IDENTITY_THRESHOLD", "0.85")),
+    "quantity": float(os.environ.get("CAMPKIT_INTAKE_QUANTITY_THRESHOLD", "0.80")),
+    "nutrition": float(os.environ.get("CAMPKIT_INTAKE_NUTRITION_THRESHOLD", "0.90")),
+    "allergen": float(os.environ.get("CAMPKIT_INTAKE_ALLERGEN_THRESHOLD", "0.95")),
+}
+
+# Provider credentials are separate app environment secrets. Never read or edit
+# the Hermes runtime configuration for these values.
+INTAKE_VISION_CLIENT = os.environ.get("CAMPKIT_VISION_CLIENT", "")
+CAMPKIT_VISION_ENDPOINT = os.environ.get("CAMPKIT_VISION_ENDPOINT", "")
+CAMPKIT_VISION_TOKEN = os.environ.get("CAMPKIT_VISION_TOKEN", "")
+CAMPKIT_VISION_TIMEOUT = float(os.environ.get("CAMPKIT_VISION_TIMEOUT", "10"))
+CAMPKIT_HERMES_NOTIFY_URL = os.environ.get("CAMPKIT_HERMES_NOTIFY_URL", "")
+CAMPKIT_HERMES_NOTIFY_TOKEN = os.environ.get("CAMPKIT_HERMES_NOTIFY_TOKEN", "")
+CAMPKIT_HERMES_NOTIFY_TRANSPORT = os.environ.get("CAMPKIT_HERMES_NOTIFY_TRANSPORT", "")
+CAMPKIT_HERMES_NOTIFY_TIMEOUT = float(os.environ.get("CAMPKIT_HERMES_NOTIFY_TIMEOUT", "5"))

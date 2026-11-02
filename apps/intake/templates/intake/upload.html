@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Add intake</title></head>
+<body><main><h1>Add a photo or barcode</h1><nav><a href="{% url 'intake:list' %}">Smart intake</a></nav>
+<p>Uploads are stored privately for your household and never served to other households.</p>
+{% if error %}<p role="alert">{{ error }}</p>{% endif %}
+<form method="post" enctype="multipart/form-data" action="{% url 'intake:create' %}">{% csrf_token %}
+<label>Item type <select name="kind">{% for value, label in kinds %}<option value="{{ value }}"{% if value == selected_kind %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label>Source <select name="channel">{% for value, label in channels %}<option value="{{ value }}"{% if value == selected_channel %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label>Barcode (optional for photos) <input type="text" name="barcode" value="{{ barcode }}" inputmode="numeric"></label>
+<label>Photo (JPEG, PNG, or WebP) <input type="file" name="image" accept="image/jpeg,image/png,image/webp"></label>
+<button type="submit">Upload for review</button>
+</form></main></body></html>

@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Smart intake</title></head>
+<body><main><h1>Smart intake</h1><nav><a href="{% url 'intake:create' %}">Add a photo or barcode</a></nav>
+{% if messages %}<ul>{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul>{% endif %}
+<h2>Verification queue</h2>
+<ul>{% for request in verification_requests %}<li>{{ request.reason }} — fields: {{ request.field_names|join:", " }} — Hermes: {{ request.get_hermes_status_display }}
+{% if request.submission_id %}<a href="{% url 'intake:detail' request.submission_id %}">Review</a>{% endif %}</li>{% empty %}<li>No facts need verification.</li>{% endfor %}</ul>
+<h2>Submissions</h2>
+<ul>{% for submission in submissions %}<li><a href="{% url 'intake:detail' submission.pk %}">{{ submission }}</a> — {{ submission.get_status_display }}{% if submission.attempts %} — attempts: {{ submission.attempts }}{% endif %}{% if submission.failure_reason %} — {{ submission.failure_reason }}{% endif %}</li>{% empty %}<li>No photos or barcodes submitted yet.</li>{% endfor %}</ul>
+</main></body></html>
