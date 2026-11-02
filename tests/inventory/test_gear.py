@@ -58,11 +58,20 @@ def test_gear_delete_is_household_scoped_and_audited(owner, household, gear_data
 
 
 @pytest.mark.django_db
+def test_nonmember_cannot_read_another_households_weight_totals(owner, other_owner, household, other_household, gear_data):
+    create_gear_item(actor=other_owner, household=other_household,
+                     data={**gear_data, "household": other_household, "weight_grams": 1234})
+
+    with pytest.raises(PermissionDenied):
+        weight_totals(actor=owner, household=other_household)
+
+
+@pytest.mark.django_db
 def test_weight_totals_include_estimated_and_confirmed_with_distinction(owner, household, gear_data):
     estimated = create_gear_item(actor=owner, household=household, data=gear_data)
     confirmed = create_gear_item(actor=owner, household=household, data={**gear_data, "name": "Stove", "weight_grams": 900,
       "verification_status": InventoryVerification.CONFIRMED})
-    assert weight_totals(household=household) == {"estimated_grams": 1800, "confirmed_grams": 900, "total_grams": 2700}
+    assert weight_totals(actor=owner, household=household) == {"estimated_grams": 1800, "confirmed_grams": 900, "total_grams": 2700}
     assert estimated.verification_status == InventoryVerification.ESTIMATED
     assert confirmed.verification_status == InventoryVerification.CONFIRMED
 

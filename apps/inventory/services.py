@@ -108,7 +108,8 @@ def list_gear(*, actor, household):
     return GearItem.objects.for_household(household)
 
 
-def weight_totals(*, household):
+def weight_totals(*, actor, household):
+    require_household_member(actor, household.pk)
     items = GearItem.objects.for_household(household)
     totals = {"estimated_grams": 0, "confirmed_grams": 0}
     for item in items:

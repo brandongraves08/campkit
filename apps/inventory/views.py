@@ -16,7 +16,7 @@ def gear_list(request):
     household = current_household(request)
     return render(request, "inventory/gear_list.html", {
         "items": list_gear(actor=request.user, household=household),
-        "weights": weight_totals(household=household),
+        "weights": weight_totals(actor=request.user, household=household),
     })
 
 
