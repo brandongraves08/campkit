@@ -12,11 +12,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DJANGO_SETTINGS_MODULE=config.settings \
     CAMPKIT_DATA_DIR=/data
 
-# Application dependencies are pinned here at the versions declared in
-# pyproject.toml; gunicorn is the only addition, because Django ships no
-# production WSGI server. The project is not ``pip install``-ed as a package:
-# setuptools cannot auto-discover a flat layout with two top-level packages
-# (``apps`` and ``config``), so the checkout is copied and run in place.
+# Keep these ARG pins aligned with pyproject.toml. The web image installs
+# runtime dependencies directly and runs the copied source tree; explicit
+# package discovery supports editable developer/test installs only.
 ARG DJANGO_VERSION=5.2.18
 ARG PSYCOPG_VERSION=3.3.6
 ARG GUNICORN_VERSION=23.0.0
