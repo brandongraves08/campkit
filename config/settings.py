@@ -19,6 +19,7 @@ INSTALLED_APPS = [
     "apps.trips.apps.TripsConfig",
     "apps.meals.apps.MealsConfig",
     "apps.intake.apps.IntakeConfig",
+    "apps.enrichment.apps.EnrichmentConfig",
 ]
 
 MIDDLEWARE = [
@@ -117,3 +118,28 @@ CAMPKIT_HERMES_NOTIFY_URL = os.environ.get("CAMPKIT_HERMES_NOTIFY_URL", "")
 CAMPKIT_HERMES_NOTIFY_TOKEN = os.environ.get("CAMPKIT_HERMES_NOTIFY_TOKEN", "")
 CAMPKIT_HERMES_NOTIFY_TRANSPORT = os.environ.get("CAMPKIT_HERMES_NOTIFY_TRANSPORT", "")
 CAMPKIT_HERMES_NOTIFY_TIMEOUT = float(os.environ.get("CAMPKIT_HERMES_NOTIFY_TIMEOUT", "5"))
+
+# Sourced enrichment providers are selected by dotted path (or an instance in
+# tests). Unset means the shipped null provider: no data, no fabrication, and no
+# blocked manual entry. Credentials are separate app environment secrets and are
+# never read from, or written to, the Hermes runtime configuration.
+CAMPKIT_NUTRITION_PROVIDER = os.environ.get(
+    "CAMPKIT_NUTRITION_PROVIDER", "apps.enrichment.usda.UsdaNutritionProvider"
+)
+CAMPKIT_PRODUCT_RESEARCHER = os.environ.get(
+    "CAMPKIT_PRODUCT_RESEARCHER", "apps.enrichment.research.HermesResearchProvider"
+)
+CAMPKIT_USDA_API_KEY = os.environ.get("CAMPKIT_USDA_API_KEY", "")
+CAMPKIT_USDA_BASE_URL = os.environ.get("CAMPKIT_USDA_BASE_URL", "https://api.nal.usda.gov/fdc/v1")
+CAMPKIT_USDA_TIMEOUT = float(os.environ.get("CAMPKIT_USDA_TIMEOUT", "10"))
+CAMPKIT_HERMES_RESEARCH_URL = os.environ.get("CAMPKIT_HERMES_RESEARCH_URL", "")
+CAMPKIT_HERMES_RESEARCH_TOKEN = os.environ.get("CAMPKIT_HERMES_RESEARCH_TOKEN", "")
+CAMPKIT_HERMES_RESEARCH_TIMEOUT = float(os.environ.get("CAMPKIT_HERMES_RESEARCH_TIMEOUT", "10"))
+# Provider responses are cached with their fetch time; stale cached values may
+# still be shown, but only labelled stale.
+CAMPKIT_ENRICHMENT_CACHE_TTL_SECONDS = int(
+    os.environ.get("CAMPKIT_ENRICHMENT_CACHE_TTL_SECONDS", str(30 * 24 * 3600))
+)
+CAMPKIT_ENRICHMENT_MIN_CONFIDENCE = os.environ.get("CAMPKIT_ENRICHMENT_MIN_CONFIDENCE", "0.300")
+# A price observation older than this is presented as stale, never as current.
+CAMPKIT_PRICE_STALE_DAYS = int(os.environ.get("CAMPKIT_PRICE_STALE_DAYS", "30"))

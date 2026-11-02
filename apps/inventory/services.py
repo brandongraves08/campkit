@@ -3,7 +3,13 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.households.permissions import require_household_member
-from apps.inventory.models import GearItem, InventoryVerification, NutritionFact, PantryItem
+from apps.inventory.models import (
+    GearItem,
+    InventoryVerification,
+    NutritionFact,
+    PantryItem,
+    PriceObservation,
+)
 
 
 def _validate_scope(actor, household, data):
@@ -163,6 +169,21 @@ def list_pantry(*, actor, household):
     return PantryItem.objects.for_household(household)
 
 
+def get_pantry_item(*, actor, item_id, household=None):
+    """Return one pantry item the actor may access, never a cross-household row.
+
+    ``household`` optionally pins the lookup: a caller that already resolved a
+    household cannot be handed an item from a different one.
+    """
+    item = PantryItem.objects.select_related("household").filter(pk=item_id).first()
+    if item is None:
+        raise PantryItem.DoesNotExist(f"Pantry item {item_id} does not exist.")
+    require_household_member(actor, item.household_id)
+    if household is not None and item.household_id != household.pk:
+        raise PermissionDenied("Pantry item belongs to a different household.")
+    return item
+
+
 def get_gear_item(*, actor, household, item_id):
     require_household_member(actor, household.pk)
     return GearItem.objects.for_household(household).get(pk=item_id)
@@ -246,11 +267,49 @@ def create_nutrition_fact(*, actor, household, item_id, data):
     return fact
 
 
+def list_nutrition_facts(*, actor, household, item_id):
+    """Return the stored nutrition facts for one household-scoped pantry item."""
+    require_household_member(actor, household.pk)
+    item = get_pantry_item(actor=actor, item_id=item_id, household=household)
+    return NutritionFact.objects.filter(item=item).order_by("nutrient")
+
+
+@transaction.atomic
+def upsert_nutrition_fact(*, actor, household, item_id, data):
+    """Create or refresh one sourced nutrition fact for a pantry item.
+
+    ``NutritionFact`` is unique per ``(item, nutrient)``, so a re-enrichment
+    updates the existing row deliberately instead of colliding on insert. A
+    human-confirmed fact is never overwritten by sourced data: the confirmed
+    value wins and ``(fact, False)`` tells the caller nothing changed.
+    """
+    require_household_member(actor, household.pk)
+    item = get_pantry_item(actor=actor, item_id=item_id, household=household)
+    values = _safe_values(data)
+    nutrient = str(values.get("nutrient") or "").strip()
+    if not nutrient:
+        raise ValidationError({"nutrient": "A nutrient name is required."})
+    values["nutrient"] = nutrient
+    existing = NutritionFact.objects.filter(item=item, nutrient=nutrient).first()
+    if existing is None:
+        return create_nutrition_fact(actor=actor, household=household, item_id=item_id, data=values), True
+    if existing.verification_status == InventoryVerification.CONFIRMED:
+        return existing, False
+    before = _snapshot(existing)
+    for key, value in values.items():
+        setattr(existing, key, value)
+    existing.full_clean()
+    existing.save()
+    from apps.audit.services import record_change
+    record_change(actor=actor, household=household, object=existing, action="nutrition_refreshed",
+                  before=before, after=_snapshot(existing))
+    return existing, True
+
+
 @transaction.atomic
 def record_price(*, actor, household, item_id, amount, currency="USD", merchant="", source="", source_url="", observed_at=None, confidence=None, verification_status=InventoryVerification.ESTIMATED):
     require_household_member(actor, household.pk)
     item = PantryItem.objects.for_household(household).get(pk=item_id)
-    from apps.inventory.models import PriceObservation
     observed_at = observed_at or timezone.now()
     observation = PriceObservation(item=item, amount=amount, currency=currency.upper(), merchant=merchant,
       source=source or merchant, source_url=source_url, observed_at=observed_at, confidence=confidence,
@@ -263,3 +322,10 @@ def record_price(*, actor, household, item_id, amount, currency="USD", merchant=
       after={"amount": str(observation.amount), "currency": observation.currency, "merchant": merchant, "source_url": source_url,
              "observed_at": observation.observed_at.isoformat()})
     return observation
+
+
+def list_price_observations(*, actor, household, item_id):
+    """Dated price observations for one household-scoped item, newest first."""
+    require_household_member(actor, household.pk)
+    item = get_pantry_item(actor=actor, item_id=item_id, household=household)
+    return PriceObservation.objects.filter(item=item).order_by("-observed_at")
