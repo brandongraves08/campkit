@@ -1,4 +1,5 @@
 import ast
+import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -363,6 +364,56 @@ def test_primary_ctas_are_real_submit_controls_with_wrapping_css(client, owner, 
     assert "flex-wrap: wrap" in css or "flex-wrap:wrap" in css
     assert "@media (max-width: 640px)" in css or "@media (max-width:640px)" in css
     assert "overflow-x: auto" in css or "overflow-x:auto" in css
+
+
+# --------------------------------------------------------------------------- #
+# Id-bearing actions collapse a foreign id and a missing id to the same 404
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.django_db
+def test_id_bearing_ui_actions_collapse_foreign_and_missing_ids_to_404(
+    client, owner, other_owner, other_household, pantry_data, trip_data
+):
+    """Whole-branch regression: unguarded lookups raised DoesNotExist (HTTP 500).
+
+    Four inventory actions and the three meal screens answered a *nonexistent*
+    id with a 500 while a *foreign* id returned 404, so the two cases were
+    distinguishable and a caller could probe which UUIDs exist. Both must be the
+    same 404, and the rejected call must not touch the other household.
+    """
+    other_gear = create_gear_item(
+        actor=other_owner, household=other_household,
+        data={"name": "Other household lantern", "weight_grams": 500},
+    )
+    other_pantry = create_pantry_item(
+        actor=other_owner, household=other_household,
+        data={**pantry_data, "household": other_household, "name": "Other household rice"},
+    )
+    other_trip = create_trip(
+        actor=other_owner, household=other_household,
+        data={**trip_data, "name": "Other household trip"},
+    )
+    client.force_login(owner)
+
+    absent = uuid.uuid4()
+    checks = [
+        ("post", "inventory:gear_delete", other_gear.pk),
+        ("post", "inventory:gear_confirm", other_gear.pk),
+        ("post", "inventory:pantry_delete", other_pantry.pk),
+        ("post", "inventory:pantry_confirm", other_pantry.pk),
+        ("get", "meals:meal_list", other_trip.pk),
+        ("post", "meals:confirm_meal_plan", other_trip.pk),
+        ("post", "meals:reconcile_trip_food", other_trip.pk),
+    ]
+    for method, name, record_id in checks:
+        foreign = getattr(client, method)(reverse(name, args=[record_id]))
+        missing = getattr(client, method)(reverse(name, args=[absent]))
+        assert foreign.status_code == 404, (name, foreign.status_code)
+        assert missing.status_code == 404, (name, missing.status_code)
+        assert b"Other household" not in foreign.content, name
+
+    assert type(other_gear).objects.filter(pk=other_gear.pk).exists()
+    assert type(other_pantry).objects.filter(pk=other_pantry.pk).exists()
 
 
 # --------------------------------------------------------------------------- #

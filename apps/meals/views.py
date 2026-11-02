@@ -1,7 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
 from django.http import Http404
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
@@ -17,7 +17,7 @@ def _trip_or_404(trip_id, actor):
     """Keep foreign trip ids indistinguishable from missing ones in the UI."""
     try:
         return get_trip_for_actor(trip_id, actor)
-    except PermissionDenied:
+    except (ObjectDoesNotExist, PermissionDenied):
         raise Http404("Trip not found.")
 
 

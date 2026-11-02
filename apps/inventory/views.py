@@ -55,7 +55,8 @@ def gear_edit(request, item_id):
 @require_http_methods(["POST"])
 def gear_delete(request, item_id):
     household = current_household(request)
-    delete_gear_item(actor=request.user, household=household, item_id=item_id)
+    item = get_object_or_404(GearItem.objects.for_household(household), pk=item_id)
+    delete_gear_item(actor=request.user, household=household, item_id=item.pk)
     return redirect("inventory:gear_list")
 
 
@@ -63,7 +64,8 @@ def gear_delete(request, item_id):
 @require_POST
 def gear_confirm(request, item_id):
     household = current_household(request)
-    update_gear_item(actor=request.user, household=household, item_id=item_id,
+    item = get_object_or_404(GearItem.objects.for_household(household), pk=item_id)
+    update_gear_item(actor=request.user, household=household, item_id=item.pk,
                      data={"verification_status": "confirmed"})
     return redirect("inventory:gear_list")
 
@@ -132,7 +134,8 @@ def pantry_edit(request, item_id):
 @require_http_methods(["POST"])
 def pantry_delete(request, item_id):
     household = current_household(request)
-    delete_pantry_item(actor=request.user, household=household, item_id=item_id)
+    item = get_object_or_404(PantryItem.objects.for_household(household), pk=item_id)
+    delete_pantry_item(actor=request.user, household=household, item_id=item.pk)
     return redirect("inventory:pantry_list")
 
 
@@ -140,6 +143,7 @@ def pantry_delete(request, item_id):
 @require_POST
 def pantry_confirm(request, item_id):
     household = current_household(request)
-    update_pantry_item(actor=request.user, household=household, item_id=item_id,
+    item = get_object_or_404(PantryItem.objects.for_household(household), pk=item_id)
+    update_pantry_item(actor=request.user, household=household, item_id=item.pk,
                        data={"verification_status": "confirmed"})
     return redirect("inventory:pantry_list")
