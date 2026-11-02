@@ -148,13 +148,11 @@ of `/data/private`, records SHA-256 checksums and a manifest, and prunes files
 older than `CAMPKIT_BACKUP_RETENTION_DAYS` (default 14).
 
 ```bash
-# consistent snapshot: no writes while the two files are taken
-docker compose stop web
-CAMPKIT_BACKUP_DIR=/srv/campkit-backups deploy/backup.sh
-docker compose start web
+# A consistent backup: stops web if it was running and always restores its prior state
+CAMPKIT_BACKUP_DIR=/srv/campkit-backups deploy/backup-consistent.sh
 
-# verify the newest backup's checksums and dump signature
-CAMPKIT_BACKUP_DIR=/srv/campkit-backups deploy/backup.sh --verify
+# verify the newest backup's checksums and dump signature (no downtime)
+CAMPKIT_BACKUP_DIR=/srv/campkit-backups deploy/backup-consistent.sh --verify
 ```
 
 The script takes no password: `pg_dump` runs inside the `db` container, where

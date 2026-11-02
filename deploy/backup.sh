@@ -65,10 +65,8 @@ require_tools() {
 require_stack_running() {
     local running
     running=$(compose ps --status running --services 2>/dev/null || true)
-    for service in db web; do
-        printf '%s\n' "${running}" | grep -qx "${service}" \
-            || die "the '${service}' service is not running; start it with: docker compose -f ${COMPOSE_FILE} up -d"
-    done
+    printf '%s\n' "${running}" | grep -qx "db" \
+        || die "the 'db' service is not running; start it with: docker compose -f ${COMPOSE_FILE} up -d db"
 }
 
 take_backup() {
