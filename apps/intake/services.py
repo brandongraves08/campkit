@@ -69,10 +69,58 @@ UNIT_ALIASES = {
 REVIEW_ACTIONS = {"approve", "correct", "confirm", "reject"}
 MAX_MANUAL_ATTEMPTS_LIMIT = 10
 MAX_NOTE = 200
+# The precision the inventory layer can store (``PantryItem.quantity``/``IntakeCandidate.quantity``).
+INVENTORY_QUANTITY_PRECISION = Decimal("0.001")
 
 
 def _quantize(value) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.001"))
+
+
+def _quantity_problem(kind: str, quantity: Decimal) -> str:
+    """Return why the inventory layer cannot store ``quantity``, or ``""`` when it can.
+
+    The provider contract accepts any ``Decimal`` in 0..1,000,000, but gear stock
+    is a whole-number count and pantry stock keeps three decimal places. Callers
+    use this to route unrepresentable values to human review instead of letting
+    the inventory layer raise out of a half-finished job.
+    """
+    if kind == IntakeKind.GEAR:
+        if quantity != quantity.to_integral_value():
+            return "Gear quantities must be whole numbers."
+        return ""
+    try:
+        storable = quantity.quantize(INVENTORY_QUANTITY_PRECISION)
+    except (InvalidOperation, ValueError):
+        return "The quantity cannot be stored at three decimal places."
+    if storable != quantity:
+        return "Pantry quantities support at most three decimal places."
+    return ""
+
+
+def _stored_quantity(quantity: Decimal) -> Decimal:
+    """Round a provider quantity to the precision our storage keeps.
+
+    The unrounded value is preserved in :class:`IntakeFieldEvidence` so a
+    reviewer still sees exactly what the provider claimed.
+    """
+    try:
+        return quantity.quantize(INVENTORY_QUANTITY_PRECISION)
+    except (InvalidOperation, ValueError):
+        return Decimal("0.000")
+
+
+def _validation_message(exc: ValidationError) -> str:
+    """Flatten a Django ``ValidationError`` into one bounded, user-safe line."""
+    if hasattr(exc, "message_dict"):
+        return _bounded(
+            "; ".join(
+                f"{field}: {', '.join(str(item) for item in messages_)}"
+                for field, messages_ in exc.message_dict.items()
+            ),
+            200,
+        )
+    return _bounded("; ".join(str(item) for item in exc.messages), 200)
 
 
 def effective_threshold(field_name: str) -> Decimal:
@@ -165,6 +213,13 @@ def evaluate_candidate(payload: CandidatePayload) -> tuple[list[dict], list[dict
         blocking.append({
             "field": "quantity",
             "reason": f"Quantity confidence {quantity_confidence} is below the review floor of {effective_threshold('quantity')}.",
+        })
+    elif (problem := _quantity_problem(payload.kind, payload.quantity)):
+        # A provider-legal value the inventory layer cannot store is a review
+        # reason, never an exception: no fact is rounded into stock silently.
+        blocking.append({
+            "field": "quantity",
+            "reason": f"{problem} Correct the extracted amount before it is added.",
         })
     elif payload.kind == IntakeKind.PANTRY and payload.quantity > 1 and not _normalize_unit(payload.unit):
         blocking.append({"field": "quantity", "reason": "The unit for the extracted quantity is unknown."})
@@ -389,7 +444,51 @@ def process_submission(submission_id):
             "Vision provider extracted a different item type than requested.",
             retryable=False,
         )
-    return _apply_payload(submission, payload)
+    try:
+        return _apply_payload(submission, payload)
+    except ValidationError as exc:
+        return _review_instead_of_failing(submission, exc, stage="candidate")
+    except Exception as exc:  # noqa: BLE001 - a claimed submission must never be stranded
+        return _review_instead_of_failing(submission, exc, stage="unexpected")
+
+
+def _review_instead_of_failing(submission: IntakeSubmission, exc: Exception, *, stage: str):
+    """Route an interrupted add to human review instead of losing the submission.
+
+    ``process_submission`` claims the row (``status=PROCESSING``) before any
+    candidate work runs, so an exception escaping here would leave the upload
+    with no candidate, no verification request and no manual-entry path. Any
+    failure to store a provider-legal payload therefore becomes a reviewable
+    state; nothing is rounded into inventory and no field is invented.
+    """
+    labels = {
+        "inventory": "the extracted values could not be stored as inventory",
+        "candidate": "the extracted candidate could not be stored",
+        "unexpected": "processing failed unexpectedly",
+    }
+    label = labels.get(stage, labels["unexpected"])
+    if isinstance(exc, ValidationError):
+        detail = _validation_message(exc)
+    else:
+        # Never echo arbitrary exception text into a household-visible field.
+        detail = type(exc).__name__
+    with transaction.atomic():
+        submission.refresh_from_db()
+        if submission.status in {IntakeStatus.ADDED, IntakeStatus.REJECTED}:
+            return submission
+        submission.status = IntakeStatus.NEEDS_REVIEW
+        submission.failure_reason = _bounded(f"Smart intake could not store {label}: {detail}", 240)
+        submission.processed_at = timezone.now()
+        submission.save(update_fields=["status", "failure_reason", "processed_at", "updated_at"])
+        _audit(submission, "intake_needs_review", actor=submission.submitted_by,
+               after={"stage": stage, "error": type(exc).__name__, "reason": detail})
+        _open_verification_request(
+            submission=submission,
+            fields=["identity", "quantity"],
+            reason=f"Smart intake could not store {label}; correct the item manually. ({detail})",
+        )
+    submission.refresh_from_db()
+    return submission
 
 
 def _finish_failure(submission: IntakeSubmission, message: str, *, retryable: bool):
@@ -432,7 +531,7 @@ def _candidate_values(submission: IntakeSubmission, payload: CandidatePayload) -
         "brand": payload.brand[:120],
         "model_number": payload.model_number[:120],
         "barcode": (payload.barcode or submission.barcode)[:64],
-        "quantity": payload.quantity,
+        "quantity": _stored_quantity(payload.quantity),
         "unit": _normalize_unit(payload.unit),
         "weight_grams": payload.weight_grams,
         "nutrition": nutrition,
@@ -589,7 +688,14 @@ def _apply_payload(submission: IntakeSubmission, payload: CandidatePayload):
             )
             return submission
 
-        item = _create_inventory_item(submission, candidate, actor=submission.submitted_by, confirmed=False)
+        try:
+            # Nested atomic block = savepoint: an inventory rejection rolls back
+            # only this write, never the candidate/audit work already done above.
+            with transaction.atomic():
+                item = _create_inventory_item(submission, candidate, actor=submission.submitted_by,
+                                              confirmed=False)
+        except ValidationError as exc:
+            return _review_instead_of_failing(submission, exc, stage="inventory")
         submission.created_item_kind = submission.kind
         submission.created_item_id = str(item.pk)
         submission.status = IntakeStatus.ADDED
@@ -652,6 +758,9 @@ def _validate_corrections(submission: IntakeSubmission, corrections: dict) -> di
                 raise ValidationError({"quantity": "Quantity must be a decimal number."}) from exc
             if not value.is_finite() or value <= 0 or value > Decimal("1000000"):
                 raise ValidationError({"quantity": "Quantity must be between 0 and 1,000,000."})
+            problem = _quantity_problem(submission.kind, value)
+            if problem:
+                raise ValidationError({"quantity": problem})
         elif field_name == "unit":
             value = _normalize_unit(raw)
             if not value:
