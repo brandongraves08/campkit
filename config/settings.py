@@ -20,6 +20,7 @@ INSTALLED_APPS = [
     "apps.meals.apps.MealsConfig",
     "apps.intake.apps.IntakeConfig",
     "apps.enrichment.apps.EnrichmentConfig",
+    "apps.api.apps.ApiConfig",
 ]
 
 MIDDLEWARE = [
@@ -118,6 +119,10 @@ CAMPKIT_HERMES_NOTIFY_URL = os.environ.get("CAMPKIT_HERMES_NOTIFY_URL", "")
 CAMPKIT_HERMES_NOTIFY_TOKEN = os.environ.get("CAMPKIT_HERMES_NOTIFY_TOKEN", "")
 CAMPKIT_HERMES_NOTIFY_TRANSPORT = os.environ.get("CAMPKIT_HERMES_NOTIFY_TRANSPORT", "")
 CAMPKIT_HERMES_NOTIFY_TIMEOUT = float(os.environ.get("CAMPKIT_HERMES_NOTIFY_TIMEOUT", "5"))
+
+# The API/MCP adapter authenticates as one dedicated service identity so every
+# audit row is attributable to Hermes rather than to a household human.
+CAMPKIT_SERVICE_USERNAME = os.environ.get("CAMPKIT_SERVICE_USERNAME", "hermes")
 
 # Sourced enrichment providers are selected by dotted path (or an instance in
 # tests). Unset means the shipped null provider: no data, no fabrication, and no
