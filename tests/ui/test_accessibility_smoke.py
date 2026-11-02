@@ -68,6 +68,8 @@ def test_form_controls_have_accessible_names(rendered_pages):
             self.images = []
             self.ids = []
             self._in_label = False
+            self._button = None
+            self._button_text = ""
 
         def handle_starttag(self, tag, attrs):
             attrs = dict(attrs)
@@ -85,13 +87,22 @@ def test_form_controls_have_accessible_names(rendered_pages):
                     "type": attrs.get("type", "text"),
                 })
             elif tag == "button":
-                self.buttons.append(attrs)
+                self._button = attrs
+                self._button_text = ""
             elif tag == "img":
                 self.images.append(attrs)
+
+        def handle_data(self, data):
+            if self._button is not None:
+                self._button_text += data
 
         def handle_endtag(self, tag):
             if tag == "label":
                 self._in_label = False
+            elif tag == "button" and self._button is not None:
+                self.buttons.append({**self._button, "text": self._button_text})
+                self._button = None
+                self._button_text = ""
 
     for url, response in rendered_pages.items():
         parser = Audit()
@@ -106,7 +117,8 @@ def test_form_controls_have_accessible_names(rendered_pages):
             )
         for button in parser.buttons:
             assert button.get("type") in {"submit", "button", "reset"}, f"button type missing on {url}"
-            assert button.get("aria-label") or True
+            accessible_name = (button.get("aria-label") or "").strip() or button["text"].strip()
+            assert accessible_name, f"button without an accessible name on {url}: {button}"
         for image in parser.images:
             assert "alt" in image, f"image without alt on {url}"
 

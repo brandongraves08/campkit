@@ -798,8 +798,13 @@ def _validate_corrections(submission: IntakeSubmission, corrections: dict) -> di
         candidate = getattr(submission, "candidate", None)
         current_unit = candidate.unit if candidate is not None else ""
         quantity = cleaned.get("quantity", candidate.quantity if candidate is not None else Decimal("1"))
-        if not _normalize_unit(current_unit) and Decimal(quantity) == 1:
-            cleaned["unit"] = "each"
+        if not _normalize_unit(current_unit):
+            if Decimal(quantity) == 1:
+                # "one of these" is unambiguous, so the unit is explicit rather
+                # than left blank; anything else must be chosen by the member.
+                cleaned["unit"] = "each"
+            else:
+                raise ValidationError({"unit": "Choose a supported unit for the corrected quantity."})
     return cleaned
 
 

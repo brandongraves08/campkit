@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from apps.audit.models import InventoryChange
 from apps.inventory.models import InventoryVerification, PantryItem
+from apps.meals import services as meals_services
 from apps.meals.models import FoodReservation, Meal, MealIngredient, MealVerificationRequest
 from apps.meals.services import confirm_meal_plan, reconcile_trip_food
 from apps.trips.services import cancel_trip, create_trip
@@ -57,6 +58,48 @@ def test_conflict_rolls_back_all_reservations(owner, household):
     assert not FoodReservation.objects.filter(meal__trip=trip).exists()
 
 
+def test_failure_after_the_first_stock_move_rolls_back_the_whole_reservation(
+    owner, household, monkeypatch
+):
+    """The pre-flight check is not the only rollback path that matters.
+
+    Here both items have enough stock, the first movement succeeds, and the
+    second raises inside the same transaction. Every earlier write of that
+    transaction — stock, reservations, audit rows — must disappear.
+    """
+
+    trip = create_trip(actor=owner, household=household, data={"name": "Camp"})
+    first = pantry(household, owner, "5")
+    second = pantry(household, owner, "5")
+    meal_for(owner, household, trip, first, "2")
+    meal_for(owner, household, trip, second, "2")
+
+    real_move = meals_services.move_confirmed_pantry_stock
+    movements = []
+
+    def flaky_move(**kwargs):
+        movements.append(str(kwargs["item_id"]))
+        if len(movements) == 2:
+            raise ValidationError("Injected failure after the first stock move.")
+        return real_move(**kwargs)
+
+    monkeypatch.setattr(meals_services, "move_confirmed_pantry_stock", flaky_move)
+    with pytest.raises(ValidationError, match="Injected failure"):
+        confirm_meal_plan(trip_id=trip.pk, actor=owner)
+    assert len(movements) == 2, "the failure must happen after a real first movement"
+
+    first.refresh_from_db()
+    second.refresh_from_db()
+    trip.refresh_from_db()
+    assert first.quantity == Decimal("5")
+    assert second.quantity == Decimal("5")
+    assert trip.status == "planned"
+    assert not FoodReservation.objects.filter(meal__trip=trip).exists()
+    assert not InventoryChange.objects.filter(
+        household=household, action__in=["food_reserved", "food_reservation_created"]
+    ).exists()
+
+
 def test_estimated_stock_creates_verification_request_and_is_never_reserved(owner, household):
     trip = create_trip(actor=owner, household=household, data={"name": "Camp"})
     estimated = pantry(household, owner, "5", InventoryVerification.ESTIMATED)
@@ -90,6 +133,15 @@ def test_reconciliation_requires_every_reserved_item(owner, household):
         reconcile_trip_food(trip_id=trip.pk, consumed_quantities={}, actor=owner)
     item.refresh_from_db()
     assert item.quantity == Decimal("2")
+
+
+def test_reconciling_a_planned_trip_explains_itself(owner, household):
+    trip = create_trip(actor=owner, household=household, data={"name": "Camp"})
+    with pytest.raises(ValidationError) as excinfo:
+        reconcile_trip_food(trip_id=trip.pk, consumed_quantities={}, actor=owner)
+    message = str(excinfo.value)
+    assert "confirm the meal plan" in message
+    assert "Invalid trip status transition" not in message
 
 
 def test_trip_cancellation_releases_reservation(owner, household):

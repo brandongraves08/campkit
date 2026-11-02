@@ -2,6 +2,10 @@ from pathlib import Path
 import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+# Every mutable file the app writes (currently the private intake store) lives
+# under one directory so a container can mount it as a durable volume. Local
+# runs keep the historical ``BASE_DIR`` layout.
+DATA_DIR = Path(os.environ.get("CAMPKIT_DATA_DIR", BASE_DIR))
 SECRET_KEY = os.environ.get("SECRET_KEY", "")
 DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
 ALLOWED_HOSTS = [host.strip() for host in os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if host.strip()]
@@ -99,9 +103,20 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 X_FRAME_OPTIONS = "DENY"
 
+# The deployment never terminates TLS itself. A reverse proxy on the home
+# network or VPN terminates TLS and forwards to the loopback-bound container,
+# so Django must trust that one proxy header to know the request is secure.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+# Public origins the proxy serves, for POST/CSRF under that hostname.
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CAMPKIT_CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 # Private photo/barcode intake. Uploads live outside static/media roots and are
 # served only through household-scoped views.
-INTAKE_UPLOAD_ROOT = Path(os.environ.get("CAMPKIT_INTAKE_UPLOAD_ROOT", BASE_DIR / "private" / "intake"))
+INTAKE_UPLOAD_ROOT = Path(os.environ.get("CAMPKIT_INTAKE_UPLOAD_ROOT", DATA_DIR / "private" / "intake"))
 INTAKE_MAX_IMAGE_BYTES = int(os.environ.get("CAMPKIT_INTAKE_MAX_IMAGE_BYTES", 5 * 1024 * 1024))
 INTAKE_MAX_ATTEMPTS = int(os.environ.get("CAMPKIT_INTAKE_MAX_ATTEMPTS", 3))
 INTAKE_CONFIDENCE_THRESHOLDS = {

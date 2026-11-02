@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.urls import reverse
@@ -58,3 +60,30 @@ def test_trip_dates_cannot_end_before_start(owner, household):
         create_trip(actor=owner, household=household, data={
             "name": "Invalid", "start_date": date.today(), "end_date": date.today() - timedelta(days=1)
         })
+
+
+def test_packing_an_unknown_or_foreign_gear_id_is_a_message_not_a_crash(
+    client, owner, other_owner, household, other_household
+):
+    """An id the household cannot pack must not become a 500 (Task 3 finding)."""
+
+    trip = create_trip(actor=owner, household=household, data={"name": "Pine weekend"})
+    foreign_gear = GearItem.objects.create(household=other_household, name="Not mine", weight_grams=100)
+    client.force_login(owner)
+
+    scoped_ids = (str(uuid.uuid4()), str(foreign_gear.pk))
+    for gear_id in scoped_ids:
+        response = client.post(
+            reverse("trips:trip_gear_add", args=[trip.pk]),
+            {"gear_item_id": gear_id, "quantity": "1"},
+            follow=True,
+        )
+        assert response.status_code == 200, gear_id
+        assert b"not available in this household" in response.content, gear_id
+    malformed = client.post(
+        reverse("trips:trip_gear_add", args=[trip.pk]),
+        {"gear_item_id": "not-a-uuid", "quantity": "1"},
+        follow=True,
+    )
+    assert malformed.status_code == 200, "a malformed id is a message, not a 500"
+    assert not TripGear.objects.filter(trip=trip).exists()

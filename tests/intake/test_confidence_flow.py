@@ -284,3 +284,33 @@ def test_hermes_followup_delivery_retries_and_records_attempts(owner, household,
     assert request.hermes_attempts == 2
     assert request.hermes_delivered_at is not None
     assert sent and sent[0]["request_id"] == str(request.pk)
+
+
+@pytest.mark.django_db
+def test_correcting_an_unknown_quantity_requires_an_explicit_unit(owner, household, png_photo,
+                                                                 use_vision, fake_vision, make_payload):
+    """A correction may not silently become 'each' for a multi-item quantity.
+
+    The candidate has no usable unit and more than one unit of stock, so the
+    household has to say what the number counts. A single item still resolves
+    to 'each', which is unambiguous.
+    """
+
+    use_vision(fake_vision(payload=make_payload(quantity=Decimal("2"), unit="")))
+    submission = _upload(owner, household, png_photo)
+    submission = process_submission(submission.pk)
+    assert submission.status == IntakeStatus.NEEDS_REVIEW
+    assert PantryItem.objects.count() == 0
+
+    with pytest.raises(ValidationError) as excinfo:
+        resolve_intake(submission.pk, actor=owner, decision={
+            "action": "correct", "corrections": {"name": "Mystery tin", "quantity": "2"},
+        })
+    assert "supported unit" in str(excinfo.value)
+    assert PantryItem.objects.count() == 0
+
+    resolved = resolve_intake(submission.pk, actor=owner, decision={
+        "action": "correct", "corrections": {"name": "Mystery tin", "quantity": "2", "unit": "each"},
+    })
+    item = PantryItem.objects.get(pk=resolved.created_item_id)
+    assert item.quantity == Decimal("2.000") and item.unit == "each"

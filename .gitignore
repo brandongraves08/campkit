@@ -5,3 +5,6 @@ __pycache__/
 .env
 staticfiles/
 private/
+# deploy/backup.sh writes here by default; backups never belong in the repo.
+backups/
+.codegraph/

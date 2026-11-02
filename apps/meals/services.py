@@ -153,6 +153,13 @@ def reconcile_trip_food(*, trip_id, consumed_quantities, actor):
     trip = _trip(trip_id, actor, lock=True)
     if trip.status == "cancelled":
         raise ValidationError("A cancelled trip cannot be reconciled.")
+    if trip.status == "planned":
+        # Reconciling a planned trip used to fail later with the generic
+        # "Invalid trip status transition." from ``set_trip_status``. A planned
+        # trip has reserved nothing, so say what the household has to do.
+        raise ValidationError(
+            "This trip has no reserved food yet; confirm the meal plan before reconciling stock."
+        )
     reservations = list(FoodReservation.objects.select_for_update().filter(
         meal__trip_id=trip.pk, status=FoodReservation.Status.RESERVED,
     ).order_by("pk"))
