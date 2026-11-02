@@ -1,9 +1,11 @@
-"""Regression tests: provider-legal quantities inventory cannot store.
+"""Regression tests: provider-legal payload values inventory cannot store as-is.
 
-``VisionClient`` accepts any ``Decimal`` in 0..1,000,000, but gear stock is a
-whole-number count and pantry stock stores three decimal places. Such payloads
-must route to human review (never crash processing, never auto-add, never
-strand the submission in ``PROCESSING``).
+``VisionClient`` accepts any ``Decimal`` quantity in 0..1,000,000 and evidence
+links up to 255 characters, but gear stock is a whole-number count, pantry stock
+stores three decimal places, and inventory provenance URLs store 200 characters.
+Such payloads must route to human review or be trimmed to the documented storage
+bound -- never crash processing, never auto-add a rounded value, and never strand
+the submission in ``PROCESSING``.
 """
 
 from decimal import Decimal
@@ -19,6 +21,7 @@ from apps.intake.models import (
     VerificationRequestStatus,
 )
 from apps.intake.services import process_submission, resolve_intake, submit_intake
+from apps.intake.vision import EvidenceItem
 from apps.inventory.models import GearItem, InventoryVerification, PantryItem
 
 
@@ -192,6 +195,24 @@ def test_unexpected_processing_error_still_reaches_human_review(
     assert VerificationRequest.objects.filter(
         submission=submission, status=VerificationRequestStatus.OPEN
     ).exists()
+
+
+@pytest.mark.django_db
+def test_long_evidence_url_is_bounded_before_inventory_storage(
+    owner, household, png_photo, use_vision, fake_vision, make_payload
+):
+    long_url = "https://example.test/" + "a" * 240
+    use_vision(fake_vision(payload=make_payload(
+        evidence=(EvidenceItem("name", "Trail mix", "label", 0.95, source_url=long_url),),
+    )))
+    submission = _submit(owner, household, png_photo)
+
+    submission = process_submission(submission.pk)  # must not raise
+
+    assert submission.status == IntakeStatus.ADDED
+    item = PantryItem.objects.get(pk=submission.created_item_id)
+    assert item.source_url.startswith("https://example.test/")
+    assert len(item.source_url) <= 200
 
 
 @pytest.mark.django_db

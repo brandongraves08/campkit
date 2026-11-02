@@ -621,9 +621,17 @@ def _source_for(candidate: IntakeCandidate) -> str:
 
 
 def _primary_source_url(candidate: IntakeCandidate) -> str:
+    """First evidence link, bounded to the inventory ``URLField`` length (200).
+
+    ``EvidenceItem``/``IntakeFieldEvidence`` allow 255 characters, but the
+    inventory provenance ``URLField`` stores 200; trimming here keeps a long but
+    legitimate provider link from turning a confidently read item into a
+    validation failure at the inventory boundary.
+    """
     for evidence in candidate.field_evidence.all():
-        if evidence.source_url:
-            return evidence.source_url
+        url = str(evidence.source_url or "").strip()
+        if url.lower().startswith(("https://", "http://")):
+            return url[:200]
     return ""
 
 
