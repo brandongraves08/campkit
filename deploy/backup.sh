@@ -88,8 +88,10 @@ take_backup() {
     [ "$(head -c 5 "${db_dump}")" = "PGDMP" ] || die "the database dump is not a PostgreSQL custom-format archive"
 
     printf 'Writing media archive to %s\n' "${media_archive}" >&2
-    # tar runs inside the container so files keep their on-volume ownership.
-    compose exec -T web sh -c \
+    # Use an ephemeral one-off web container so the app remains stopped while
+    # tar reads the shared data volume; `compose exec web` cannot target a
+    # deliberately stopped service.
+    compose run --rm --no-deps -T --entrypoint /bin/sh web -c \
         'mkdir -p /data/private && exec tar --create --gzip --file - --directory /data private' \
         >"${media_archive}"
     gzip -t "${media_archive}" || die "the media archive is not a valid gzip stream"
