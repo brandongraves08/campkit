@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sign in · CampKit</title>
+  </head>
+  <body>
+    <main>
+      <h1>Sign in to CampKit</h1>
+      {% if form.errors %}<p role="alert">Your username or password was not accepted.</p>{% endif %}
+      <form method="post">
+        {% csrf_token %}
+        <label for="id_username">Email</label>
+        <input id="id_username" name="username" type="text" autocomplete="username" required>
+        <label for="id_password">Password</label>
+        <input id="id_password" name="password" type="password" autocomplete="current-password" required>
+        <button type="submit">Sign in</button>
+        <input type="hidden" name="next" value="{{ next }}">
+      </form>
+      <p>CampKit accounts are available by household invitation only.</p>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Join CampKit</title></head>
+  <body>
+    <main>
+      <h1>Join your CampKit household</h1>
+      <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit">Create account</button>
+      </form>
+    </main>
+  </body>
+</html>
