@@ -149,6 +149,27 @@ def test_gear_is_household_scoped_and_foreign_ids_are_indistinguishable(client, 
     assert listing["gear"][0]["id"] == item_id
 
 
+def test_api_refuses_food_categories_on_gear(client, tokens):
+    response = post(
+        client,
+        reverse("api:gear-collection"),
+        {"name": "Mountain House bucket", "category": "Food", "quantity": 1},
+        tokens["primary"],
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "validation_error"
+    assert get(client, reverse("api:gear-collection"), tokens["primary"]).json()["gear"] == []
+
+    # The same shape is accepted once it is filed as pantry stock.
+    pantry = post(
+        client,
+        reverse("api:pantry-collection"),
+        {"name": "Mountain House bucket", "quantity": "30", "unit": "each"},
+        tokens["primary"],
+    )
+    assert pantry.status_code == 200
+
+
 def test_trip_scope_is_pinned_even_when_the_service_identity_joins_both_households(
     client, tokens
 ):

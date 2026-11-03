@@ -220,8 +220,8 @@ def test_gear_manual_correction_requires_a_whole_number(
     owner, household, png_photo, use_vision, fake_vision, make_payload
 ):
     use_vision(fake_vision(payload=make_payload(
-        kind="gear", quantity=Decimal("1.5"), unit="", nutrition={}, allergens=(),
-        nutrition_confidence=0.0, allergen_confidence=0.0,
+        kind="gear", name="Camp stove", category="Cookware", quantity=Decimal("1.5"), unit="",
+        nutrition={}, allergens=(), nutrition_confidence=0.0, allergen_confidence=0.0,
     )))
     submission = _submit(owner, household, png_photo, kind="gear")
     submission = process_submission(submission.pk)

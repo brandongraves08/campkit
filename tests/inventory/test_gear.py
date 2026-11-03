@@ -105,3 +105,46 @@ def test_gear_form_and_list_are_authenticated_and_household_scoped(client, owner
     assert b"Tent" in response.content
     assert b"Other tent" not in response.content
     assert own.name == "Tent"
+
+
+@pytest.mark.parametrize(
+    "category", ["Food", "food", "Meals", "rations", "MRE", "freeze-dried", " Pantry ", "beverages"]
+)
+@pytest.mark.django_db
+def test_gear_rejects_food_categories_and_points_at_pantry(owner, household, gear_data, category):
+    with pytest.raises(ValidationError) as excinfo:
+        create_gear_item(actor=owner, household=household, data={**gear_data, "category": category})
+    assert "category" in excinfo.value.message_dict
+    assert "Pantry" in excinfo.value.message_dict["category"][0]
+
+
+@pytest.mark.parametrize(
+    "category", ["Shelter", "Backpack", "Cookware", "Food storage", "Water filter", ""]
+)
+@pytest.mark.django_db
+def test_gear_keeps_durable_categories(owner, household, gear_data, category):
+    item = create_gear_item(actor=owner, household=household, data={**gear_data, "category": category})
+    assert item.category == category
+
+
+@pytest.mark.django_db
+def test_gear_update_cannot_reclassify_durable_as_food(owner, household, gear_data):
+    item = create_gear_item(actor=owner, household=household, data=gear_data)
+    with pytest.raises(ValidationError):
+        update_gear_item(
+            actor=owner, household=household, item_id=item.pk, data={"category": "Meals"}
+        )
+    item.refresh_from_db()
+    assert item.category == "shelter"
+
+
+@pytest.mark.django_db
+def test_gear_form_shows_food_category_error_instead_of_saving(client, owner, household, gear_data):
+    client.force_login(owner)
+    payload = {key: value for key, value in gear_data.items() if key != "household"}
+    payload["category"] = "Food"
+    response = client.post(reverse("inventory:gear_create"), payload)
+    assert response.status_code == 200
+    assert b"belong in Pantry" in response.content
+    assert not GearItem.objects.for_household(household).exists()
+

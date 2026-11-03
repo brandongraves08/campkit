@@ -18,6 +18,46 @@ class HouseholdInventoryManager(models.Manager):
         return self.get_queryset().filter(household=household)
 
 
+#: Gear categories that actually describe edible supplies. Consumables are
+#: PantryItems (quantity + unit, expiry, price, nutrition); keeping them in Gear
+#: splits the same stock across two models and breaks trip/meal planning.
+FOOD_GEAR_CATEGORIES = frozenset(
+    {
+        "food",
+        "foods",
+        "meal",
+        "meals",
+        "ration",
+        "rations",
+        "mre",
+        "mres",
+        "snack",
+        "snacks",
+        "groceries",
+        "grocery",
+        "provisions",
+        "pantry",
+        "freeze dried",
+        "beverage",
+        "beverages",
+        "drink",
+        "drinks",
+    }
+)
+
+
+def _category_is_food(category) -> bool:
+    """True when a gear category names food rather than durables.
+
+    Matches the whole category, not a substring, so legitimate durable
+    categories such as "Food storage" (a cooler or container) stay valid.
+    """
+    normalized = " ".join(
+        str(category or "").lower().replace("_", " ").replace("-", " ").split()
+    )
+    return bool(normalized) and normalized in FOOD_GEAR_CATEGORIES
+
+
 class ProvenanceModel(models.Model):
     source = models.CharField(max_length=255, blank=True)
     source_url = models.URLField(blank=True)
@@ -67,6 +107,15 @@ class GearItem(ProvenanceModel):
             raise ValidationError({"weight_grams": "Weight cannot be negative."})
         if self.quantity < 0:
             raise ValidationError({"quantity": "Quantity cannot be negative."})
+        if _category_is_food(self.category):
+            raise ValidationError(
+                {
+                    "category": (
+                        "Food and other consumables belong in Pantry, not Gear. "
+                        "Add this item to the pantry instead."
+                    )
+                }
+            )
 
     @property
     def total_weight_grams(self):
