@@ -201,7 +201,7 @@ Deployment checks were performed on 2026-11-03; the isolated restore rehearsal u
 | --- | --- | --- |
 | Local automated checks | **passed** | Full pytest suite: 236 passed; Django system check under test settings and `git diff --check` passed |
 | HTTPS login/signup pages | **passed** | The live internal route returned HTTP 200 |
-| Disposable self-registration/login, invitation acceptance, and trip/gear/pantry/meal creation | **passed** | Exercised over internal HTTPS; synthetic users, households, and records were readback-verified removed |
+| Disposable self-registration/login, invitation acceptance, and household switching | **passed** | Exercised over internal HTTPS; synthetic users and households were readback-verified removed. Live trip/gear/pantry/meal creation was not separately exercised |
 | Case-insensitive login ambiguity and household-selection regressions | **passed** | Covered by automated tests; not claimed as a live mixed-case login check |
 | Isolated backup-restore rehearsal | **passed** | Backup passed SHA-256 and gzip checks; PostgreSQL restore in an isolated stack matched table row counts. The media archive restored without files; no production records were modified |
 | Deployment-backed MCP smoke call and optional external-provider integrations | **not run** | These integrations were outside the live app-flow check and need separate verification before use |
