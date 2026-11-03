@@ -83,7 +83,7 @@ def test_overview_shows_upcoming_trip_readiness_weights_and_scope(
     client, owner, household, gear_data, trip_data
 ):
     tent = _confirmed_gear(owner, household, gear_data)
-    pad_data = {**gear_data, "name": "Sleeping pad", "category": "Sleep", "weight_grams": 700}
+    pad_data = {**gear_data, "name": "Sleeping pad", "category": "Sleep system", "weight_grams": 700}
     pad = create_gear_item(actor=owner, household=household, data=pad_data)
     trip = create_trip(actor=owner, household=household, data=trip_data)
     tent_entry = add_trip_gear(trip_id=trip.pk, gear_item_id=tent.pk, quantity=1, actor=owner)

@@ -12,9 +12,6 @@
     <form method="post">
       {% csrf_token %}
       {{ form.as_p }}
-      <datalist id="gear-category-options">
-        {% for option in form.category_suggestions %}<option value="{{ option }}"></option>{% endfor %}
-      </datalist>
       <div class="button-row">
         <button class="button button-primary" type="submit">Save</button>
         <a class="button" href="{% url 'inventory:gear_list' %}">Cancel</a>

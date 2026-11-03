@@ -48,22 +48,29 @@ FOOD_CATEGORY_WORDS = frozenset(
 #: Multi-word food phrases whose individual words are too generic to flag alone.
 FOOD_CATEGORY_PHRASES = ("freeze dried", "freeze dry", "meal replacement", "trail food")
 
-#: Categories offered in the gear form. A suggestion list, not a constraint, so
-#: a household can still add something new while being steered to durables.
-GEAR_CATEGORY_SUGGESTIONS = (
-    "Backpack",
-    "Shelter",
-    "Sleep system",
-    "Cookware",
-    "Water",
-    "Lighting",
-    "Navigation",
-    "Tools & repair",
-    "Clothing",
-    "Safety",
-    "Food storage",
-    "Other",
-)
+#: The only categories a gear item may carry. A hard vocabulary, so a meal
+#: bucket cannot be filed as gear under some novel label: food lives in Pantry,
+#: and this list names durable kinds only. Add a category here (with a test)
+#: when a household needs one.
+class GearCategory(models.TextChoices):
+    BACKPACK = "Backpack", "Backpack"
+    SHELTER = "Shelter", "Shelter"
+    SLEEP = "Sleep system", "Sleep system"
+    COOKWARE = "Cookware", "Cookware"
+    KITCHEN = "Kitchen", "Kitchen"
+    WATER = "Water", "Water"
+    LIGHTING = "Lighting", "Lighting"
+    NAVIGATION = "Navigation", "Navigation"
+    TOOLS = "Tools & repair", "Tools & repair"
+    CLOTHING = "Clothing", "Clothing"
+    CLIMBING = "Climbing", "Climbing"
+    SAFETY = "Safety", "Safety"
+    FOOD_STORAGE = "Food storage", "Food storage"
+    OTHER = "Other", "Other"
+
+
+#: Categories offered in the gear form (derived, so the two can never drift).
+GEAR_CATEGORY_SUGGESTIONS = tuple(label for _, label in GearCategory.choices)
 
 #: Durable nouns that legitimately appear next to a food word: a cooler, a
 #: storage bin, or a food-grade scale is gear, not stock. Their presence means
@@ -106,6 +113,36 @@ def _normalize_category(category) -> str:
     return " ".join(
         str(category or "").lower().replace("_", " ").replace("-", " ").split()
     )
+
+
+_CATEGORY_BY_NORMALIZED = {
+    _normalize_category(value): value for value, _ in GearCategory.choices
+}
+
+
+def canonical_gear_category(category) -> str:
+    """Map a case/space/hyphen variant onto the canonical vocabulary value.
+
+    "shelter", "SHELTER" and "sleep-system" become "Shelter" and "Sleep system";
+    anything outside the vocabulary is returned unchanged so field validation can
+    report it as an invalid choice.
+    """
+    raw = str(category or "").strip()
+    if not raw:
+        return ""
+    return _CATEGORY_BY_NORMALIZED.get(_normalize_category(raw), raw)
+
+
+def _category_is_food_error(category):
+    """The validation error for a food category, or None when it is durable."""
+    if not _category_is_food(category):
+        return None
+    return {
+        "category": (
+            "Food and other consumables belong in Pantry, not Gear. "
+            "Add this item to the pantry instead."
+        )
+    }
 
 
 def _category_is_food(category) -> bool:
@@ -157,7 +194,7 @@ class GearItem(ProvenanceModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     household = models.ForeignKey("households.Household", on_delete=models.CASCADE, related_name="gear_items")
     name = models.CharField(max_length=160)
-    category = models.CharField(max_length=80, blank=True)
+    category = models.CharField(max_length=80, blank=True, choices=GearCategory.choices)
     owner = models.CharField(max_length=120, blank=True)
     condition = models.CharField(max_length=40, blank=True)
     weight_grams = models.PositiveIntegerField(null=True, blank=True)
@@ -169,21 +206,26 @@ class GearItem(ProvenanceModel):
 
     objects = HouseholdInventoryManager()
 
+    def clean_fields(self, exclude=None):
+        """Canonicalize the category, then refuse food before choice validation.
+
+        Running the food check first means a food category gets the "belongs in
+        Pantry" message rather than a generic "not a valid choice", while any
+        other value outside the vocabulary is still rejected by the field
+        choices.
+        """
+        self.category = canonical_gear_category(self.category)
+        food_error = _category_is_food_error(self.category)
+        if food_error is not None:
+            raise ValidationError(food_error)
+        super().clean_fields(exclude=exclude)
+
     def clean(self):
         super().clean()
         if self.weight_grams is not None and self.weight_grams < 0:
             raise ValidationError({"weight_grams": "Weight cannot be negative."})
         if self.quantity < 0:
             raise ValidationError({"quantity": "Quantity cannot be negative."})
-        if _category_is_food(self.category):
-            raise ValidationError(
-                {
-                    "category": (
-                        "Food and other consumables belong in Pantry, not Gear. "
-                        "Add this item to the pantry instead."
-                    )
-                }
-            )
 
     @property
     def total_weight_grams(self):

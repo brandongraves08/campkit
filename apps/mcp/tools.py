@@ -47,7 +47,7 @@ def _uuid(description):
 
 GEAR_PROPERTIES = {
     "name": _text("Gear item name."),
-    "category": _text("Gear category for durables, for example shelter or cooking. Food and consumables belong in pantry, never gear."),
+    "category": _text("Gear category for durables, one of: Backpack, Shelter, Sleep system, Cookware, Kitchen, Water, Lighting, Navigation, Tools & repair, Clothing, Climbing, Safety, Food storage, Other. Food and consumables belong in pantry, never gear."),
     "owner": _text("Who owns the item."),
     "condition": _text("Condition, for example good or worn."),
     "weight_grams": _integer("Item weight per unit in grams."),

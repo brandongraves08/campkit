@@ -170,6 +170,28 @@ def test_api_refuses_food_categories_on_gear(client, tokens):
     assert pantry.status_code == 200
 
 
+def test_api_refuses_gear_categories_outside_the_vocabulary(client, tokens):
+    response = post(
+        client,
+        reverse("api:gear-collection"),
+        {"name": "Mystery item", "category": "Camping", "quantity": 1},
+        tokens["primary"],
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "validation_error"
+    assert get(client, reverse("api:gear-collection"), tokens["primary"]).json()["gear"] == []
+
+    allowed = post(
+        client,
+        reverse("api:gear-collection"),
+        {"name": "Tent", "category": "Shelter", "quantity": 1},
+        tokens["primary"],
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["gear"]["category"] == "Shelter"
+
+
+
 def test_trip_scope_is_pinned_even_when_the_service_identity_joins_both_households(
     client, tokens
 ):

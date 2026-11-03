@@ -1,4 +1,5 @@
 import pytest
+from django import forms
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.urls import reverse
 
@@ -139,9 +140,9 @@ def test_gear_rejects_food_categories_and_points_at_pantry(owner, household, gea
         "Backpack",
         "Cookware",
         "Food storage",
-        "Food-grade scale",
-        "Water filter",
-        "Food cooler",
+        "Water",
+        "Kitchen",
+        "Climbing",
         "",
     ],
 )
@@ -149,6 +150,48 @@ def test_gear_rejects_food_categories_and_points_at_pantry(owner, household, gea
 def test_gear_keeps_durable_categories(owner, household, gear_data, category):
     item = create_gear_item(actor=owner, household=household, data={**gear_data, "category": category})
     assert item.category == category
+
+
+@pytest.mark.parametrize(
+    "written, stored",
+    [
+        ("shelter", "Shelter"),
+        ("SHELTER", "Shelter"),
+        ("sleep-system", "Sleep system"),
+        ("food_storage", "Food storage"),
+    ],
+)
+@pytest.mark.django_db
+def test_gear_category_variants_map_onto_the_vocabulary(owner, household, gear_data, written, stored):
+    item = create_gear_item(actor=owner, household=household, data={**gear_data, "category": written})
+    assert item.category == stored
+
+
+@pytest.mark.parametrize("category", ["Camping", "Gizmo", "Sleep", "Water filter"])
+@pytest.mark.django_db
+def test_gear_rejects_categories_outside_the_vocabulary(owner, household, gear_data, category):
+    with pytest.raises(ValidationError) as excinfo:
+        create_gear_item(actor=owner, household=household, data={**gear_data, "category": category})
+    assert "category" in excinfo.value.message_dict
+
+
+@pytest.mark.django_db
+def test_gear_vocabulary_has_no_food_categories():
+    from apps.inventory.models import GearCategory, _category_is_food
+
+    assert not [value for value, _ in GearCategory.choices if _category_is_food(value)]
+
+
+def test_gear_form_offers_the_vocabulary_as_a_select():
+    from apps.inventory.forms import GearItemForm
+    from apps.inventory.models import GearCategory
+
+    field = GearItemForm.base_fields["category"]
+    offered = [value for value, _ in field.choices if value]
+    assert offered == [value for value, _ in GearCategory.choices]
+    assert isinstance(field.widget, forms.Select)
+
+
 
 
 
@@ -160,7 +203,7 @@ def test_gear_update_cannot_reclassify_durable_as_food(owner, household, gear_da
             actor=owner, household=household, item_id=item.pk, data={"category": "Meals"}
         )
     item.refresh_from_db()
-    assert item.category == "shelter"
+    assert item.category == "Shelter"
 
 
 @pytest.mark.django_db
