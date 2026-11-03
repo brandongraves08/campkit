@@ -108,7 +108,21 @@ def test_gear_form_and_list_are_authenticated_and_household_scoped(client, owner
 
 
 @pytest.mark.parametrize(
-    "category", ["Food", "food", "Meals", "rations", "MRE", "freeze-dried", " Pantry ", "beverages"]
+    "category",
+    [
+        "Food",
+        "food",
+        "Meals",
+        "rations",
+        "MRE",
+        "freeze-dried",
+        " Pantry ",
+        "beverages",
+        "Trail snacks",
+        "MRE rations",
+        "Food items",
+        "camp meals",
+    ],
 )
 @pytest.mark.django_db
 def test_gear_rejects_food_categories_and_points_at_pantry(owner, household, gear_data, category):
@@ -119,12 +133,23 @@ def test_gear_rejects_food_categories_and_points_at_pantry(owner, household, gea
 
 
 @pytest.mark.parametrize(
-    "category", ["Shelter", "Backpack", "Cookware", "Food storage", "Water filter", ""]
+    "category",
+    [
+        "Shelter",
+        "Backpack",
+        "Cookware",
+        "Food storage",
+        "Food-grade scale",
+        "Water filter",
+        "Food cooler",
+        "",
+    ],
 )
 @pytest.mark.django_db
 def test_gear_keeps_durable_categories(owner, household, gear_data, category):
     item = create_gear_item(actor=owner, household=household, data={**gear_data, "category": category})
     assert item.category == category
+
 
 
 @pytest.mark.django_db
