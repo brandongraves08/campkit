@@ -1,5 +1,6 @@
 import ast
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -8,6 +9,7 @@ from django.test import Client
 
 from apps.households.models import Household, Invitation, Membership, MembershipRole
 from apps.households.permissions import current_household, require_household_member
+from apps.households.views import CaseInsensitiveAuthenticationForm
 
 
 @pytest.mark.django_db
@@ -189,11 +191,200 @@ def test_login_without_active_household_prompts_for_selection(
         {"username": owner.email.upper(), "password": "owner-pass-123"},
     )
     assert response.status_code == 302
-    assert response["Location"] == "/accounts/households/select/"
+    assert response["Location"].startswith("/accounts/households/select/")
     selection = client.get(response["Location"])
     assert selection.status_code == 200
     assert b"Smith household" in selection.content
     assert b"Other household" in selection.content
+
+
+@pytest.mark.django_db
+def test_multi_household_login_preserves_safe_deep_link(client, owner, other_household):
+    Membership.objects.create(
+        user=owner,
+        household=other_household,
+        role=MembershipRole.MEMBER,
+    )
+    login = client.post(
+        "/accounts/login/?next=/trips/",
+        {"username": owner.email, "password": "owner-pass-123"},
+    )
+    assert login.status_code == 302
+    assert login["Location"].startswith("/accounts/households/select/?next=")
+
+    selection = client.get(login["Location"])
+    assert selection.status_code == 200
+    switched = client.post(
+        "/accounts/households/select/",
+        {
+            "household_id": str(other_household.pk),
+            "next": "/trips/",
+        },
+    )
+    assert switched.status_code == 302
+    assert switched["Location"] == "/trips/"
+    assert client.get("/trips/").status_code == 200
+
+
+@pytest.mark.django_db
+def test_multi_household_login_preserves_invitation_next(
+    client, owner, other_household
+):
+    Membership.objects.create(
+        user=owner,
+        household=other_household,
+        role=MembershipRole.MEMBER,
+    )
+    invite_owner = get_user_model().objects.create_user(
+        username="invite-owner@example.test",
+        email="invite-owner@example.test",
+        password="Invite-owner-pass-123!",
+    )
+    invited_household = Household.objects.create(name="Invitation Household")
+    Membership.objects.create(
+        user=invite_owner,
+        household=invited_household,
+        role=MembershipRole.OWNER,
+    )
+    invitation = Invitation.objects.create(
+        household=invited_household,
+        email=owner.email,
+        created_by=invite_owner,
+    )
+    invitation_url = f"/accounts/signup/{invitation.token}/"
+
+    login = client.post(
+        f"/accounts/login/?next={invitation_url}",
+        {"username": owner.email, "password": "owner-pass-123"},
+    )
+    assert login.status_code == 302
+    assert login["Location"] == invitation_url
+    assert "active_household_id" not in client.session
+
+    assert b"Accept household invitation" in client.get(invitation_url).content
+    accepted = client.post(invitation_url, {})
+    assert accepted.status_code == 302
+    assert (
+        Membership.objects.get(user=owner, household=invited_household).role
+        == MembershipRole.MEMBER
+    )
+    assert client.session["active_household_id"] == str(invited_household.pk)
+    assert not Invitation.objects.filter(pk=invitation.pk).exists()
+
+
+@pytest.mark.django_db
+def test_exact_mixed_case_existing_username_can_still_log_in(client):
+    username = "Mixed.Case@example.test"
+    get_user_model().objects.create_user(
+        username=username,
+        email=username,
+        password="Mixed-case-pass-123!",
+    )
+    response = client.post(
+        "/accounts/login/",
+        {"username": username, "password": "Mixed-case-pass-123!"},
+    )
+    assert response.status_code == 302
+
+
+@pytest.mark.django_db
+def test_ambiguous_case_insensitive_login_requires_exact_username():
+    user_model = get_user_model()
+    user_model.objects.create_user(
+        username="Case@example.test",
+        email="Case@example.test",
+        password="Upper-case-pass-123!",
+    )
+    lower_user = user_model.objects.create_user(
+        username="case@example.test",
+        email="case@example.test",
+        password="Lower-case-pass-123!",
+    )
+
+    ambiguous = CaseInsensitiveAuthenticationForm(
+        data={
+            "username": "CASE@example.test",
+            "password": "Lower-case-pass-123!",
+        }
+    )
+    assert not ambiguous.is_valid()
+
+    exact_lowercase = CaseInsensitiveAuthenticationForm(
+        data={
+            "username": "case@example.test",
+            "password": "Lower-case-pass-123!",
+        }
+    )
+    assert exact_lowercase.is_valid()
+    assert exact_lowercase.get_user().pk == lower_user.pk
+
+
+@pytest.mark.django_db
+def test_single_membership_household_selection_preserves_safe_deep_link(client, owner):
+    client.force_login(owner)
+    response = client.get("/accounts/households/select/?next=/trips/")
+    assert response.status_code == 302
+    assert response["Location"] == "/trips/"
+    assert client.get(response["Location"]).status_code == 200
+
+
+@pytest.mark.django_db
+def test_household_selection_rejects_external_next_url(client, owner, household):
+    client.force_login(owner)
+    response = client.post(
+        "/accounts/households/select/",
+        {
+            "household_id": str(household.pk),
+            "next": "https://attacker.example/",
+        },
+    )
+    assert response.status_code == 302
+    assert response["Location"] == "/"
+
+
+@pytest.mark.django_db
+def test_current_household_requires_a_valid_session_choice_for_multiple_memberships(
+    owner, household, other_household, rf
+):
+    request = rf.get("/")
+    request.user = owner
+    request.session = {}
+    assert current_household(request) == household
+
+    Membership.objects.create(
+        user=owner,
+        household=other_household,
+        role=MembershipRole.MEMBER,
+    )
+    with pytest.raises(PermissionDenied):
+        current_household(request)
+
+    request.session["active_household_id"] = "not-a-uuid"
+    with pytest.raises(PermissionDenied):
+        current_household(request)
+
+    request.session["active_household_id"] = str(other_household.pk)
+    assert current_household(request) == other_household
+
+
+@pytest.mark.django_db
+def test_invalid_active_household_session_shows_recovery_link(
+    client, owner, other_household
+):
+    Membership.objects.create(
+        user=owner,
+        household=other_household,
+        role=MembershipRole.MEMBER,
+    )
+    client.force_login(owner)
+    session = client.session
+    session["active_household_id"] = str(uuid4())
+    session.save()
+
+    response = client.get("/")
+    assert response.status_code == 403
+    assert b"Choose a household" in response.content
+    assert b"/accounts/households/select/" in response.content
 
 
 @pytest.mark.django_db
@@ -208,6 +399,19 @@ def test_invitation_email_must_match(client: Client, invitation):
     )
     assert response.status_code == 400
     assert Invitation.objects.filter(pk=invitation.pk).exists()
+
+
+@pytest.mark.django_db
+def test_authenticated_wrong_email_cannot_accept_invitation(client, owner, invitation):
+    client.force_login(owner)
+    invitation_url = f"/accounts/signup/{invitation.token}/"
+    assert client.get(invitation_url).status_code == 403
+    assert client.post(invitation_url, {}).status_code == 403
+    assert Invitation.objects.filter(pk=invitation.pk).exists()
+    assert (
+        Membership.objects.filter(user=owner, household=invitation.household).count()
+        == 1
+    )
 
 
 @pytest.mark.django_db
@@ -237,9 +441,7 @@ def test_household_member_roles_and_cross_household_boundary(
 
 
 @pytest.mark.django_db
-def test_current_household_uses_authenticated_membership_and_rejects_ambiguous_context(
-    owner, household, rf
-):
+def test_current_household_resolves_a_single_membership(owner, household, rf):
     request = rf.get("/")
     request.user = owner
     assert current_household(request) == household

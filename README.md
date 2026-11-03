@@ -2,7 +2,7 @@
 
 **A private, household-scoped planner for camping trips, shared gear, and pantry stock.** CampKit brings trip readiness and inventory together while keeping estimates visibly separate from facts a household member has confirmed.
 
-> CampKit is an early, self-hosted project. It is not a public service, and deployment-backed checks are not claimed; see [project status and limitations](#status-and-limitations) and the [deployment guide](deploy/README.md).
+> CampKit is an early, self-hosted project, not a public service. The internal deployment has passed disposable signup/login, invitation acceptance, and trip/gear/pantry/meal checks; an isolated backup-restore rehearsal also passed. See [project status and limitations](#status-and-limitations) and the [deployment guide](deploy/README.md).
 
 ## See CampKit
 
@@ -86,7 +86,7 @@ The suite includes server-rendered UI/accessibility smoke tests, household isola
 
 ## Status and limitations
 
-CampKit is an early, self-hosted household tool, not a managed or public cloud product. You operate the application, database, secrets, reverse proxy, and backups. The deployment guide explicitly notes checks that require Docker/PostgreSQL or a live deployment and were not run in its authoring environment; do not interpret this README as a claim that a production deployment has been exercised. Provider-backed photo recognition, nutrition, and research depend on optional integrations and confidence thresholds; suggestions and unconfirmed records are not authoritative facts. Self-registration creates a private household owned by the registering account. Users join an existing household by accepting its owner's invitation and can switch among their memberships from the app header. There is no automatic purchasing, and the Hermes tool allowlist exposes no destructive bulk mutation.
+CampKit is an early, self-hosted household tool, not a managed or public cloud product. You operate the application, database, secrets, reverse proxy, and backups. The internal deployment passed Django system and migration checks and a live disposable flow covering self-registration/login, invitation acceptance into a second household, and trip/gear/pantry/meal creation. The isolated test users and households were removed afterward. An isolated backup-restore rehearsal also passed; see the [deployment verification record](deploy/README.md#verification-status-of-this-deployment). Case-insensitive login ambiguity and household switching are covered by automated regression tests; optional provider-backed integrations and other untested workflows still need separate validation. Provider-backed photo recognition, nutrition, and research depend on optional integrations and confidence thresholds; suggestions and unconfirmed records are not authoritative facts. Self-registration creates a private household owned by the registering account. Users join an existing household by accepting its owner's invitation and can switch among their memberships from the app header. There is no automatic purchasing, and the Hermes tool allowlist exposes no destructive bulk mutation.
 
 Before using real household data, read the [deployment guide](deploy/README.md), configure a trusted private ingress and durable backups, and independently verify the deployment on your own host.
 

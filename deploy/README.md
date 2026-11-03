@@ -195,29 +195,18 @@ before an upgrade that includes migrations.
 
 ## Verification status of this deployment
 
-The host that authored this deployment has **no container runtime and no
-PostgreSQL client**: `docker`, `docker compose`, and `psql` are not installed.
-The following checks were therefore **not run** and are **not claimed**:
+The internal deployment was exercised on 2026-11-03. Evidence and remaining gaps:
 
-| Check | Status | Reason |
+| Check | Status | Notes |
 | --- | --- | --- |
-| `docker compose config -q` | **not run** | `docker` is not installed on the authoring host |
-| `docker compose build` (image build) | **not run** | same; the Dockerfile and its pins are reviewed, not executed |
-| `docker compose up` (real startup, healthchecks) | **not run** | same |
-| backup/restore against the running stack | **not run** | needs a live stack; `deploy/backup.sh` was checked with `bash -n` and its failure paths exercised |
-| deployment-backed MCP smoke call | **not run** | needs a live stack; the protocol smoke test runs locally against a throwaway SQLite database instead |
+| Web image rebuild and production Django `check --deploy` | **passed** | Rebuilt the live `web` image; the production check reported no issues |
+| Web health and HTTPS login/signup pages | **passed** | The container returned healthy; `/accounts/login/` and `/accounts/signup/` returned HTTP 200 |
+| Disposable signup, mixed-case login, invitation, existing-account acceptance, and household switching | **passed** | Exercised through the internal HTTPS route; both temporary users and households were readback-verified removed |
+| Pre-update source/DB backup | **passed** | `gzip -t` accepted the source archive and `pg_restore --list` parsed the database dump; no restore was performed |
+| Full backup restore rehearsal | **not run** | Requires an isolated restore stack |
+| Deployment-backed MCP smoke call and broader trip/inventory workflows | **not run** | Local suite covers app behavior; these live paths were outside this deployment check |
 
-What *was* executed locally, against the repository rather than a container:
-
-- `pytest -q` (full suite, including `tests/e2e` and the local stdio MCP smoke).
-- `python manage.py check --deploy` with production settings.
-- `bash -n deploy/backup.sh`, `./deploy/backup.sh --help`, and the missing-docker
-  failure path (exits 1 with an explicit message, creates no files).
-- `compose.yaml` parsed as YAML (structure, ports, volumes, healthchecks) with a
-  YAML parser; the Compose CLI's own schema validation did not run.
-
-Re-run the first four commands on a host with Docker before trusting this stack
-with household data.
+The full pytest suite, Ruff check/format, and `git diff --check` passed locally; they do not substitute for the explicitly unrun restore rehearsal or broader live workflows.
 
 ## Security notes
 
@@ -226,8 +215,9 @@ with household data.
 - Self-registration creates a new private household with the registering user
   as OWNER; an invitation is required to join an existing household. Household-
   scoped records and the audit trail are enforced in the application; the
-  container adds no bypass. Keep the reverse proxy restricted to a trusted
-  network/VPN.
+  container adds no bypass. The signup flow has no email verification or request
+  throttling, so keep the reverse proxy restricted to a trusted network/VPN and
+  never expose the route publicly without a separate security review.
 - Only item photos are sent to a configured vision provider, and only because
   the household authorizes it. No other household data leaves the host.
 - Nothing here deploys publicly, purchases anything, or automates destructive

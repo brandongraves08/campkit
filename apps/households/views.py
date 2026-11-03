@@ -1,4 +1,4 @@
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from django import forms
 from django.contrib.auth import get_user_model
@@ -16,7 +16,7 @@ from django.http import (
     HttpResponseNotFound,
 )
 from django.shortcuts import redirect, render
-from django.urls import reverse
+from django.urls import Resolver404, resolve, reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods, require_POST
@@ -88,25 +88,47 @@ class SelfSignupForm(forms.Form):
 
 class CaseInsensitiveAuthenticationForm(AuthenticationForm):
     def clean_username(self):
-        return self.cleaned_data["username"].strip().casefold()
+        username = self.cleaned_data["username"].strip()
+        user_model = get_user_model()
+        username_field = user_model.USERNAME_FIELD
+        exact_match = (
+            user_model._default_manager.filter(**{username_field: username})
+            .values_list(username_field, flat=True)
+            .first()
+        )
+        if exact_match is not None:
+            return exact_match
+
+        case_insensitive_matches = list(
+            user_model._default_manager.filter(
+                **{f"{username_field}__iexact": username}
+            ).values_list(username_field, flat=True)[:2]
+        )
+        if len(case_insensitive_matches) == 1:
+            return case_insensitive_matches[0]
+        return username
 
 
 class CampKitLoginView(LoginView):
     authentication_form = CaseInsensitiveAuthenticationForm
 
     def get_success_url(self):
-        next_url = self.request.POST.get(
-            self.redirect_field_name
-        ) or self.request.GET.get(self.redirect_field_name)
-        if not next_url:
-            memberships = Membership.objects.filter(user=self.request.user)
-            active_id = self.request.session.get("active_household_id")
-            if (
-                memberships.count() > 1
-                and not memberships.filter(household_id=active_id).exists()
-            ):
-                return reverse("select_household")
-        return super().get_success_url()
+        success_url = super().get_success_url()
+        memberships = Membership.objects.filter(user=self.request.user)
+        if memberships.count() > 1:
+            try:
+                current_household(self.request)
+            except PermissionDenied:
+                try:
+                    route = resolve(urlsplit(success_url).path)
+                except Resolver404:
+                    route = None
+                if route is not None and route.url_name == "accept_invitation":
+                    return success_url
+                return (
+                    f"{reverse('select_household')}?{urlencode({'next': success_url})}"
+                )
+        return success_url
 
 
 @require_http_methods(["GET", "POST"])
@@ -148,13 +170,16 @@ def signup_without_invitation(request):
                 user=user, household=household, role=MembershipRole.OWNER
             )
     except IntegrityError:
-        form.add_error("email", "An account with this email already exists.")
+        if user_model.objects.filter(email__iexact=email).exists():
+            form.add_error("email", "An account with this email already exists.")
+        else:
+            form.add_error(None, "The account could not be created. Please try again.")
         return render(request, "registration/signup.html", {"form": form}, status=400)
 
     return HttpResponse(
         "Account created. Please sign in.",
         status=302,
-        headers={"Location": "/accounts/login/"},
+        headers={"Location": reverse("login")},
     )
 
 
@@ -288,7 +313,7 @@ def select_household(request):
     if request.method == "GET":
         if len(memberships) == 1:
             request.session["active_household_id"] = str(memberships[0].household_id)
-            return redirect("dashboard")
+            return redirect(_safe_next_url(request, request.GET.get("next", "")))
         return render(
             request,
             "registration/household_selection.html",
@@ -308,14 +333,17 @@ def select_household(request):
         return HttpResponseForbidden("You do not belong to that household.")
 
     request.session["active_household_id"] = str(membership.household_id)
-    next_url = request.POST.get("next", "")
+    return redirect(_safe_next_url(request, request.POST.get("next", "")))
+
+
+def _safe_next_url(request, next_url):
     if url_has_allowed_host_and_scheme(
         next_url,
         allowed_hosts={request.get_host()},
         require_https=request.is_secure(),
     ):
-        return redirect(next_url)
-    return redirect("dashboard")
+        return next_url
+    return reverse("dashboard")
 
 
 @require_POST

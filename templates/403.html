@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Access unavailable · CampKit{% endblock %}
+
+{% block content %}
+  <section class="card auth-card">
+    <h1>This household view is unavailable</h1>
+    {% if user.is_authenticated and household_choices|length > 1 %}
+      <p class="fine">Choose one of your household memberships to continue.</p>
+      <p><a class="button button-primary" href="{% url 'select_household' %}">Choose a household</a></p>
+    {% else %}
+      <p class="fine">You don’t have access to this household or page.</p>
+    {% endif %}
+  </section>
+{% endblock %}
