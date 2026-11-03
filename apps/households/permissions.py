@@ -1,6 +1,6 @@
 from django.core.exceptions import PermissionDenied
 
-from apps.households.models import Household, Membership, MembershipRole
+from apps.households.models import Membership, MembershipRole
 
 
 def current_household(request):
@@ -8,15 +8,27 @@ def current_household(request):
     if user is None or not user.is_authenticated:
         raise PermissionDenied("Authentication is required.")
     memberships = Membership.objects.filter(user=user).select_related("household")
-    if memberships.count() != 1:
-        raise PermissionDenied("A single unambiguous household membership is required.")
-    return memberships.get().household
+    count = memberships.count()
+    if count == 0:
+        raise PermissionDenied("A household membership is required.")
+    if count == 1:
+        return memberships.get().household
+
+    active_household_id = getattr(request, "session", {}).get("active_household_id")
+    membership = memberships.filter(household_id=active_household_id).first()
+    if membership is None:
+        raise PermissionDenied("Select one of your household memberships.")
+    return membership.household
 
 
 def require_household_member(user, household_id):
     if user is None or not user.is_authenticated:
         raise PermissionDenied("Authentication is required.")
-    membership = Membership.objects.filter(user=user, household_id=household_id).select_related("household").first()
+    membership = (
+        Membership.objects.filter(user=user, household_id=household_id)
+        .select_related("household")
+        .first()
+    )
     if membership is None:
         raise PermissionDenied("You are not a member of this household.")
     return membership.household

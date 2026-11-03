@@ -6,10 +6,21 @@ from apps.households import views
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("accounts/login/", auth_views.LoginView.as_view(template_name="registration/login.html"), name="login"),
+    path(
+        "accounts/login/",
+        views.CampKitLoginView.as_view(template_name="registration/login.html"),
+        name="login",
+    ),
     path("accounts/logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("accounts/signup/", views.signup_without_invitation, name="signup"),
-    path("accounts/signup/<uuid:token>/", views.accept_invitation, name="accept_invitation"),
+    path(
+        "accounts/signup/<uuid:token>/",
+        views.accept_invitation,
+        name="accept_invitation",
+    ),
+    path(
+        "accounts/households/select/", views.select_household, name="select_household"
+    ),
     path("accounts/invitations/", views.create_invitation, name="create_invitation"),
     path("", views.dashboard, name="dashboard"),
     path("recommendations/", views.recommendations, name="recommendations"),

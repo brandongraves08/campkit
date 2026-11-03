@@ -1,16 +1,40 @@
 {% extends "base.html" %}
 
-{% block title %}Join CampKit{% endblock %}
+{% block title %}{% if token %}Join CampKit · Invitation{% else %}Create a household · CampKit{% endif %}{% endblock %}
 
 {% block content %}
   <div class="card auth-card">
-    <h1>Join your CampKit household</h1>
-    <form method="post">
-      {% csrf_token %}
-      {{ form.as_p }}
-      <div class="button-row">
-        <button class="button button-primary" type="submit">Create account</button>
-      </div>
-    </form>
+    {% if token %}
+      <h1>Join your CampKit household</h1>
+      {% if accept_existing %}
+        <p class="fine">You’re signed in as the invited account. Accept to join this household as a member.</p>
+      {% elif existing_account %}
+        <p class="fine">This invitation is for an existing CampKit account. Sign in with that account to accept it.</p>
+      {% else %}
+        <p class="fine">Create an account to join the household that invited you.</p>
+      {% endif %}
+    {% else %}
+      <h1>Create your CampKit household</h1>
+      <p class="fine">Your account starts a new private household. Existing households stay separate; their owners can invite you later.</p>
+    {% endif %}
+    {% if accept_existing %}
+      <form method="post">
+        {% csrf_token %}
+        <div class="button-row">
+          <button class="button button-primary" type="submit">Accept household invitation</button>
+        </div>
+      </form>
+    {% elif existing_account %}
+      <p class="button-row"><a class="button button-primary" href="{{ login_url }}">Sign in to accept this invitation</a></p>
+    {% else %}
+      <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <div class="button-row">
+          <button class="button button-primary" type="submit">Create account</button>
+        </div>
+      </form>
+    {% endif %}
+    <p class="fine"><a href="{% url 'login' %}">Back to sign in</a></p>
   </div>
 {% endblock %}

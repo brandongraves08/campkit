@@ -5,16 +5,32 @@ from apps.households.services import household_role
 
 
 def household_context(request):
-    """Expose the household scope on every rendered page (header, nav, tests).
+    """Expose the active household and the authenticated user's choices."""
+    if not getattr(request, "user", None) or not request.user.is_authenticated:
+        return {}
 
-    A visitor with no single unambiguous membership gets an empty mapping rather
-    than a 500; the base template then renders anonymous chrome.
-    """
+    memberships = list(
+        request.user.memberships.select_related("household").order_by("household__name")
+    )
+    choices = []
     try:
         household = current_household(request)
     except PermissionDenied:
-        return {}
-    return {
-        "household": household,
-        "household_role": household_role(actor=request.user, household=household),
-    }
+        household = None
+
+    for membership in memberships:
+        choices.append(
+            {
+                "household": membership.household,
+                "selected": household is not None
+                and membership.household_id == household.pk,
+            }
+        )
+
+    context = {"household_choices": choices}
+    if household is not None:
+        context["household"] = household
+        context["household_role"] = household_role(
+            actor=request.user, household=household
+        )
+    return context
