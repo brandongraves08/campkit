@@ -60,7 +60,7 @@ python manage.py createsuperuser
 python manage.py runserver 127.0.0.1:8000
 ```
 
-The test settings use a test-only secret and disable secure-cookie/HTTPS redirects for local use. The test database contains only data you create locally; do not point `CAMPKIT_TEST_DB` at household data. Household pages require a household membership, so a superuser alone is not a substitute for household bootstrap. CampKit sign-up is invitation-only; use the [deployment guide's first-run instructions](deploy/README.md#first-run) to bootstrap an owner and initial invitation, with local-only credentials for development.
+The test settings use a test-only secret and disable secure-cookie/HTTPS redirects for local use. The test database contains only data you create locally; do not point `CAMPKIT_TEST_DB` at household data. Household pages require a household membership, so a superuser alone is not a substitute for household bootstrap. Self-registration at `/accounts/signup/` creates a private household owned by the registrant. To join another household, follow its owner's invitation; existing account holders sign in to accept it and can switch households from the app header.
 
 Useful checks:
 
@@ -73,7 +73,7 @@ The suite includes server-rendered UI/accessibility smoke tests, household isola
 
 ## Privacy and security boundaries
 
-- CampKit accounts are invitation-only, and application pages and records are scoped to a household. Do not expose the service publicly without reviewing the [deployment security model](deploy/README.md#security-notes).
+- **New accounts get a private household; owners invite people to join existing households.** Signed-in users can switch only between their memberships, and pages and records stay scoped to the selected household. Do not expose the service publicly without reviewing the [deployment security model](deploy/README.md#security-notes).
 - Intake images are kept in a private data directory and served only through authenticated household-scoped views. A configured vision provider receives item photos only when the household authorizes that processing; provider credentials are optional. With no provider configured, the null provider does not invent data and manual entry remains available.
 - The REST API and MCP integration authenticate through a dedicated service identity; mutations are attributed to that identity in the audit trail. Review confirmation prompts before allowing sensitive actions.
 - The included Compose deployment binds its web and database ports to host loopback and expects a TLS-terminating trusted-network/VPN reverse proxy. Operators must manage secrets, proxy/static-file configuration, backups, and access to that host. See [`deploy/README.md`](deploy/README.md).
@@ -86,7 +86,7 @@ The suite includes server-rendered UI/accessibility smoke tests, household isola
 
 ## Status and limitations
 
-CampKit is an early, self-hosted household tool, not a managed or public cloud product. You operate the application, database, secrets, reverse proxy, and backups. The deployment guide explicitly notes checks that require Docker/PostgreSQL or a live deployment and were not run in its authoring environment; do not interpret this README as a claim that a production deployment has been exercised. Provider-backed photo recognition, nutrition, and research depend on optional integrations and confidence thresholds; suggestions and unconfirmed records are not authoritative facts. Accounts are invitation-only; owners can invite members. There is no automatic purchasing, and the Hermes tool allowlist exposes no destructive bulk mutation.
+CampKit is an early, self-hosted household tool, not a managed or public cloud product. You operate the application, database, secrets, reverse proxy, and backups. The deployment guide explicitly notes checks that require Docker/PostgreSQL or a live deployment and were not run in its authoring environment; do not interpret this README as a claim that a production deployment has been exercised. Provider-backed photo recognition, nutrition, and research depend on optional integrations and confidence thresholds; suggestions and unconfirmed records are not authoritative facts. Self-registration creates a private household owned by the registering account. Users join an existing household by accepting its owner's invitation and can switch among their memberships from the app header. There is no automatic purchasing, and the Hermes tool allowlist exposes no destructive bulk mutation.
 
 Before using real household data, read the [deployment guide](deploy/README.md), configure a trusted private ingress and durable backups, and independently verify the deployment on your own host.
 

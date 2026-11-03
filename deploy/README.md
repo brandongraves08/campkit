@@ -1,6 +1,6 @@
 # CampKit deployment (single host, private network)
 
-CampKit is a self-hosted, invitation-only household app. This deployment is one
+CampKit is a self-hosted household app with self-registration and invitation-based household sharing. This deployment is one
 Compose stack on one host:
 
 | Service | Image | Purpose | Reaches the network |
@@ -58,30 +58,17 @@ deploy/README.md    this file
    docker compose logs -f web
    ```
 
-3. Create the household and its owner. There is no public sign-up and no seed
-   command, so bootstrap once through the Django shell inside the container:
+3. Create the first user and household at `/accounts/signup/` through the internal
+   HTTPS hostname. The form creates a new private household and gives that user
+   the owner role; there is no seed command. A household member joins an existing
+   household only by following its owner's invitation link.
 
-   ```bash
-   docker compose exec -T web python manage.py shell <<'PY'
-   from django.contrib.auth import get_user_model
-   from apps.households.models import Household, Invitation, Membership, MembershipRole
-
-   User = get_user_model()
-   household = Household.objects.create(name="Home")
-   owner = User.objects.create_user(
-       username="owner@home.test", email="owner@home.test", password="<choose-a-strong-password>"
-   )
-   Membership.objects.create(user=owner, household=household, role=MembershipRole.OWNER)
-   invitation = Invitation.objects.create(
-       household=household, email="partner@home.test", created_by=owner
-   )
-   print("invite:", invitation.token)
-   PY
-   ```
-
-   Open `https://<host>/accounts/signup/<token>/` as the invited address.
-   Further invitations can be issued by an owner with
-   `POST /accounts/invitations/` (form field `email`) while signed in.
+   Owners issue invitations from the authenticated app with
+   `POST /accounts/invitations/` (form field `email`). The recipient uses
+   `https://<host>/accounts/signup/<token>/` and must use the invited email
+   address. New recipients create an account there; existing account holders sign
+   in, explicitly accept the invitation, and can switch between their households
+   from the app header. Data remains scoped to the selected household.
 
 ## Secrets
 
@@ -236,8 +223,11 @@ with household data.
 
 - `web` runs as the unprivileged `campkit` user (uid 10001) with
   `no-new-privileges`; both services bind to loopback only.
-- Invitation-only accounts, household-scoped records, and an audit trail are
-  enforced in the application; the container adds no bypass.
+- Self-registration creates a new private household with the registering user
+  as OWNER; an invitation is required to join an existing household. Household-
+  scoped records and the audit trail are enforced in the application; the
+  container adds no bypass. Keep the reverse proxy restricted to a trusted
+  network/VPN.
 - Only item photos are sent to a configured vision provider, and only because
   the household authorizes it. No other household data leaves the host.
 - Nothing here deploys publicly, purchases anything, or automates destructive
