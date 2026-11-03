@@ -195,19 +195,18 @@ before an upgrade that includes migrations.
 
 ## Verification status of this deployment
 
-The internal deployment was exercised on 2026-11-03. Evidence and remaining gaps:
+Deployment checks were performed on 2026-11-03; the isolated restore rehearsal used a 2026-11-02 backup. Evidence and remaining gaps:
 
 | Check | Status | Notes |
 | --- | --- | --- |
-| Django system check and migration state | **passed** | `manage.py check` and `migrate --check` succeeded on the deployed code |
+| Local automated checks | **passed** | Full pytest suite: 236 passed; Django system check under test settings and `git diff --check` passed |
 | HTTPS login/signup pages | **passed** | The live internal route returned HTTP 200 |
 | Disposable self-registration/login, invitation acceptance, and trip/gear/pantry/meal creation | **passed** | Exercised over internal HTTPS; synthetic users, households, and records were readback-verified removed |
 | Case-insensitive login ambiguity and household-selection regressions | **passed** | Covered by automated tests; not claimed as a live mixed-case login check |
-| Pre-update source/DB backup verification | **passed** | `gzip -t` accepted the source archive and `pg_restore --list` parsed the database dump |
-| Isolated backup-restore rehearsal | **passed** | PostgreSQL dump and media archive were restored in a disposable stack; production records were not modified |
+| Isolated backup-restore rehearsal | **passed** | Backup passed SHA-256 and gzip checks; PostgreSQL restore in an isolated stack matched table row counts. The media archive restored without files; no production records were modified |
 | Deployment-backed MCP smoke call and optional external-provider integrations | **not run** | These integrations were outside the live app-flow check and need separate verification before use |
 
-The full pytest suite (236 passed), Django checks, and `git diff --check` passed. They do not substitute for separate live verification of optional integrations or workflows outside the exercised paths.
+Local tests and checks do not substitute for separate live verification of optional integrations or workflows outside the exercised paths.
 
 ## Security notes
 
