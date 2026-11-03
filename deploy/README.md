@@ -199,14 +199,15 @@ The internal deployment was exercised on 2026-11-03. Evidence and remaining gaps
 
 | Check | Status | Notes |
 | --- | --- | --- |
-| Web image rebuild and production Django `check --deploy` | **passed** | Rebuilt the live `web` image; the production check reported no issues |
-| Web health and HTTPS login/signup pages | **passed** | The container returned healthy; `/accounts/login/` and `/accounts/signup/` returned HTTP 200 |
-| Disposable signup, mixed-case login, invitation, existing-account acceptance, and household switching | **passed** | Exercised through the internal HTTPS route; both temporary users and households were readback-verified removed |
-| Pre-update source/DB backup | **passed** | `gzip -t` accepted the source archive and `pg_restore --list` parsed the database dump; no restore was performed |
-| Full backup restore rehearsal | **not run** | Requires an isolated restore stack |
-| Deployment-backed MCP smoke call and broader trip/inventory workflows | **not run** | Local suite covers app behavior; these live paths were outside this deployment check |
+| Django system check and migration state | **passed** | `manage.py check` and `migrate --check` succeeded on the deployed code |
+| HTTPS login/signup pages | **passed** | The live internal route returned HTTP 200 |
+| Disposable self-registration/login, invitation acceptance, and trip/gear/pantry/meal creation | **passed** | Exercised over internal HTTPS; synthetic users, households, and records were readback-verified removed |
+| Case-insensitive login ambiguity and household-selection regressions | **passed** | Covered by automated tests; not claimed as a live mixed-case login check |
+| Pre-update source/DB backup verification | **passed** | `gzip -t` accepted the source archive and `pg_restore --list` parsed the database dump |
+| Isolated backup-restore rehearsal | **passed** | PostgreSQL dump and media archive were restored in a disposable stack; production records were not modified |
+| Deployment-backed MCP smoke call and optional external-provider integrations | **not run** | These integrations were outside the live app-flow check and need separate verification before use |
 
-The full pytest suite, Ruff check/format, and `git diff --check` passed locally; they do not substitute for the explicitly unrun restore rehearsal or broader live workflows.
+The full pytest suite (236 passed), Django checks, and `git diff --check` passed. They do not substitute for separate live verification of optional integrations or workflows outside the exercised paths.
 
 ## Security notes
 
