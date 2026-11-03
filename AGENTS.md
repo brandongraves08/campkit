@@ -53,6 +53,8 @@ and its test. Two currently enforced:
 
 ## 5. Verification you can be held to
 
+- **No CI.** This repository does not use GitHub Actions. Do not add workflows,
+  and do not ask to enable Actions; the local suite plus QA review is the gate.
 - Run the suite yourself: `python -m pytest -q` (from the repo, with the venv
   active). Report the exact command and the real count.
 - Exercise the live behavior when the change is deployable; a passing unit test
