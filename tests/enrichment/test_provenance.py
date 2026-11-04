@@ -79,7 +79,7 @@ def test_nutrition_enrichment_writes_only_supplied_values(owner, household, pant
     assert protein.confidence == Decimal("0.900")
     assert protein.source_url.startswith("https://fdc.nal.usda.gov/")
     assert "fake-nutrition" in protein.source and "2039158" in protein.source
-    assert protein.observed_at == result["fetched_at"]
+    assert result["candidate"]["retrieved_at"] == protein.observed_at.isoformat()
     assert result["written"] == ["protein_g", "energy_kcal"]
     # Missing nutrients stay unset: no invented zero rows.
     assert not NutritionFact.objects.filter(item=pantry_item, nutrient="fat_g").exists()

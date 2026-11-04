@@ -2,6 +2,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.enrichment.services import nutrition_facts, price_history
@@ -12,7 +13,7 @@ from apps.inventory.models import GearItem, PantryItem
 from apps.inventory.services import (
     create_gear_item, create_pantry_item, delete_gear_item, delete_pantry_item,
     get_pantry_item, list_gear, list_pantry, update_gear_item, update_pantry_item,
-    verification_backlog, weight_totals,
+    verification_backlog, weight_totals, _research_new_item,
 )
 
 
@@ -34,7 +35,7 @@ def gear_create(request):
     household = current_household(request)
     form = GearItemForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
-        create_gear_item(actor=request.user, household=household, data=form.cleaned_data)
+        item = create_gear_item(actor=request.user, household=household, data=form.cleaned_data)
         return redirect("inventory:gear_list")
     return render(request, "inventory/gear_form.html", {"nav": "gear", "form": form, "title": "Add gear"})
 
@@ -88,11 +89,19 @@ def pantry_detail(request, item_id):
         item = get_pantry_item(actor=request.user, item_id=item_id, household=household)
     except (PantryItem.DoesNotExist, PermissionDenied):
         raise Http404("Pantry item not found in this household.")
+    nutrition = [
+        {**fact, "observed_at": parse_datetime(fact["observed_at"])}
+        for fact in nutrition_facts(actor=request.user, household=household, item_id=item.pk)
+    ]
+    prices = [
+        {**price, "observed_at": parse_datetime(price["observed_at"])}
+        for price in price_history(actor=request.user, household=household, item_id=item.pk)
+    ]
     return render(request, "inventory/pantry_detail.html", {
         "nav": "pantry",
         "item": item,
-        "nutrition": nutrition_facts(actor=request.user, household=household, item_id=item.pk),
-        "prices": price_history(actor=request.user, household=household, item_id=item.pk),
+        "nutrition": nutrition,
+        "prices": prices,
     })
 
 
@@ -113,7 +122,7 @@ def pantry_create(request):
     household = current_household(request)
     form = PantryItemForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
-        create_pantry_item(actor=request.user, household=household, data=form.cleaned_data)
+        item = create_pantry_item(actor=request.user, household=household, data=form.cleaned_data)
         return redirect("inventory:pantry_list")
     return render(request, "inventory/pantry_form.html", {"nav": "pantry", "form": form, "title": "Add pantry item"})
 
@@ -146,4 +155,22 @@ def pantry_confirm(request, item_id):
     item = get_object_or_404(PantryItem.objects.for_household(household), pk=item_id)
     update_pantry_item(actor=request.user, household=household, item_id=item.pk,
                        data={"verification_status": "confirmed"})
+    return redirect("inventory:pantry_list")
+
+
+@login_required
+@require_POST
+def gear_research_retry(request, item_id):
+    household = current_household(request)
+    item = get_object_or_404(GearItem.objects.for_household(household), pk=item_id)
+    _research_new_item(actor=request.user, household=household, item=item)
+    return redirect("inventory:gear_list")
+
+
+@login_required
+@require_POST
+def pantry_research_retry(request, item_id):
+    household = current_household(request)
+    item = get_object_or_404(PantryItem.objects.for_household(household), pk=item_id)
+    _research_new_item(actor=request.user, household=household, item=item)
     return redirect("inventory:pantry_list")

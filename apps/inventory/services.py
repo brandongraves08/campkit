@@ -56,6 +56,17 @@ def _confirm(data, actor):
         data["verified_at"] = None
 
 
+def _research_new_item(*, actor, household, item):
+    """Research a saved row without allowing provider failures to undo it."""
+    try:
+        from apps.enrichment.services import research_inventory_item
+
+        research_inventory_item(actor=actor, household=household, item=item)
+    except Exception:
+        item.research_status = "failed"
+        item.save(update_fields=["research_status", "updated_at"])
+
+
 def _preserve_verification(item, values, actor, material_fields):
     status = values.get("verification_status")
     if status == InventoryVerification.CONFIRMED:
@@ -86,6 +97,7 @@ def create_gear_item(*, actor, household, data):
     item.save()
     from apps.audit.services import record_change
     record_change(actor=actor, household=household, object=item, action="created", before=None, after=_snapshot(item))
+    _research_new_item(actor=actor, household=household, item=item)
     return item
 
 
@@ -150,6 +162,7 @@ def create_pantry_item(*, actor, household, data):
     item.save()
     from apps.audit.services import record_change
     record_change(actor=actor, household=household, object=item, action="created", before=None, after=_snapshot(item))
+    _research_new_item(actor=actor, household=household, item=item)
     return item
 
 
@@ -315,6 +328,35 @@ def create_nutrition_fact(*, actor, household, item_id, data):
     return fact
 
 
+@transaction.atomic
+def correct_nutrition_fact(*, actor, household, item_id, fact_id, data):
+    """Record a household member's explicit correction to an estimated fact."""
+    require_household_member(actor, household.pk)
+    item = get_pantry_item(actor=actor, item_id=item_id, household=household)
+    fact = NutritionFact.objects.select_for_update().get(pk=fact_id, item=item)
+    if fact.verification_status == InventoryVerification.CONFIRMED:
+        raise ValidationError("Confirmed nutrition facts cannot be edited as estimates.")
+    before = _snapshot(fact)
+    values = _safe_values(data)
+    for key in ("amount", "unit"):
+        if key in values:
+            setattr(fact, key, values[key])
+    # This literal is the canonical provenance marker for the explicit
+    # user-correction service; provider refreshes must never infer otherwise.
+    fact.source = "manual"
+    fact.source_url = ""
+    fact.confidence = None
+    fact.observed_at = timezone.now()
+    fact.verified_by = None
+    fact.verified_at = None
+    fact.full_clean()
+    fact.save()
+    from apps.audit.services import record_change
+    record_change(actor=actor, household=household, object=fact, action="nutrition_corrected",
+                  before=before, after=_snapshot(fact))
+    return fact
+
+
 def list_nutrition_facts(*, actor, household, item_id):
     """Return the stored nutrition facts for one household-scoped pantry item."""
     require_household_member(actor, household.pk)
@@ -342,6 +384,8 @@ def upsert_nutrition_fact(*, actor, household, item_id, data):
     if existing is None:
         return create_nutrition_fact(actor=actor, household=household, item_id=item_id, data=values), True
     if existing.verification_status == InventoryVerification.CONFIRMED:
+        return existing, False
+    if existing.source == "manual":
         return existing, False
     before = _snapshot(existing)
     for key, value in values.items():

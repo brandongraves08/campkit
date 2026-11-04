@@ -237,6 +237,22 @@ section + section {
   line-height: 1.25;
 }
 
+.pantry-detail-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+}
+
+.pantry-nutrition {
+  grid-column: 1 / -1;
+}
+
+.pantry-nutrition .table-scroll table {
+  min-width: 900px;
+}
+
+.pantry-nutrition .table-scroll th {
+  white-space: nowrap;
+}
+
 .card h3 {
   margin: 0 0 0.4rem;
   font-size: 1.02rem;
@@ -377,6 +393,12 @@ button {
   margin-top: 0.3rem;
 }
 
+.actions .button {
+  box-sizing: border-box;
+  min-height: 44px;
+  height: 44px;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -458,6 +480,12 @@ form p label {
   max-width: 100%;
   border: 1px solid var(--line);
   border-radius: 10px;
+}
+
+.table-scroll caption,
+.table-scroll th,
+.table-scroll td {
+  overflow-wrap: anywhere;
 }
 
 table {
@@ -583,6 +611,56 @@ summary {
 }
 
 @media (max-width: 640px) {
+  .pantry-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pantry-nutrition .table-scroll table {
+    min-width: 0;
+  }
+
+  .table-scroll table,
+  .table-scroll tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .table-scroll caption {
+    display: block;
+  }
+
+  .table-scroll thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    left: 0;
+    top: 0;
+    white-space: nowrap;
+  }
+
+  .table-scroll tr {
+    display: block;
+    padding: 0.45rem 0.65rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .table-scroll td {
+    display: grid;
+    grid-template-columns: minmax(6.5rem, 0.8fr) minmax(0, 1.5fr);
+    gap: 0.65rem;
+    min-width: 0;
+    padding: 0.3rem 0;
+    border: 0;
+  }
+
+  .table-scroll td::before {
+    content: attr(data-label);
+    font-weight: 700;
+  }
+
   .shell {
     padding-left: 0.9rem;
     padding-right: 0.9rem;

@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
+from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
@@ -28,6 +29,7 @@ from django.utils.dateparse import parse_datetime
 
 from apps.audit.services import record_change
 from apps.enrichment.models import EnrichmentCache, ProductObservation
+from apps.enrichment.providers import NullNutritionProvider
 from apps.households.permissions import require_household_member
 from apps.integrations.registry import get_nutrition_provider, get_product_researcher
 from apps.integrations.types import (
@@ -44,12 +46,14 @@ from apps.integrations.types import (
     SourceObservation,
 )
 from apps.inventory.services import (
+    get_gear_item,
     get_pantry_item,
     list_nutrition_facts,
     list_price_observations,
     record_price as record_inventory_price,
     upsert_nutrition_fact,
 )
+
 
 NUTRITION_KIND = EnrichmentCache.NUTRITION
 PRICE_MAX = Decimal("99999999.99")
@@ -335,6 +339,7 @@ def enrich_nutrition(*, actor, household, item_id, query="", refresh=False, prov
             }
         )
         return summary
+    _store_nutrition_identity(actor=actor, household=household, item=item, candidate=best)
     if best.nutrients:
         for nutrient in best.nutrients:
             _fact, changed = upsert_nutrition_fact(
@@ -347,7 +352,7 @@ def enrich_nutrition(*, actor, household, item_id, query="", refresh=False, prov
                     "unit": nutrient.unit,
                     "source": _bounded(f"{best.provider}:{best.external_id}", 255),
                     "source_url": best.source_url,
-                    "observed_at": result["fetched_at"] or timezone.now(),
+                    "observed_at": best.retrieved_at,
                     "confidence": best.confidence,
                     "verification_status": "estimated",
                 },
@@ -359,12 +364,39 @@ def enrich_nutrition(*, actor, household, item_id, query="", refresh=False, prov
     return summary
 
 
+def _store_nutrition_identity(*, actor, household, item, candidate):
+    """Persist provider-supplied brand/barcode with that candidate's provenance."""
+    row = ProductObservation.objects.filter(item=item, source_url=candidate.source_url).first()
+    created = row is None
+    if created:
+        row = ProductObservation(item=item, source_url=candidate.source_url)
+    row.provider = _bounded(candidate.provider, 80)
+    row.title = _bounded(candidate.name, 200)
+    row.summary = _bounded(candidate.data_type, MAX_SUMMARY)
+    row.brand = _bounded(candidate.brand, 120)
+    row.barcode = _bounded(candidate.barcode, 64)
+    row.retrieved_at = candidate.retrieved_at
+    row.confidence = candidate.confidence
+    row.full_clean()
+    row.save()
+    record_change(
+        actor=actor, household=household, object=item,
+        action="product_details_researched" if created else "product_details_refreshed",
+        before=None,
+        after={"provider": row.provider, "source_url": row.source_url,
+               "brand": row.brand, "barcode": row.barcode,
+               "retrieved_at": row.retrieved_at.isoformat(), "confidence": str(row.confidence)},
+    )
+    return row
+
+
 def nutrition_facts(*, actor, household, item_id) -> list[dict]:
     """Return stored nutrition facts with their provenance and freshness data."""
     facts = list_nutrition_facts(actor=actor, household=household, item_id=item_id)
     return [
         {
             "nutrient": fact.nutrient,
+            "nutrient_label": fact.nutrient_label,
             "amount": str(fact.amount),
             "unit": fact.unit,
             "source": fact.source,
@@ -391,9 +423,10 @@ def _validated_observations(raw) -> list[SourceObservation]:
 
 
 def _store_observation(item, observation: SourceObservation) -> ProductObservation:
-    row = ProductObservation.objects.filter(item=item, source_url=observation.source_url).first()
+    fk_name = "gear_item" if item._meta.label_lower == "inventory.gearitem" else "item"
+    row = ProductObservation.objects.filter(**{fk_name: item}, source_url=observation.source_url).first()
     if row is None:
-        row = ProductObservation(item=item, source_url=observation.source_url)
+        row = ProductObservation(**{fk_name: item}, source_url=observation.source_url)
     row.provider = _bounded(observation.source, 80) or "unknown"
     row.title = _bounded(observation.title, 200)
     row.summary = _bounded(observation.summary, MAX_SUMMARY)
@@ -410,6 +443,8 @@ def _public_observation(row: ProductObservation) -> dict:
         "provider": row.provider,
         "title": row.title,
         "summary": row.summary,
+        "brand": row.brand,
+        "barcode": row.barcode,
         "source_url": row.source_url,
         "retrieved_at": row.retrieved_at.isoformat(),
         "confidence": str(row.confidence),
@@ -418,11 +453,14 @@ def _public_observation(row: ProductObservation) -> dict:
 
 @transaction.atomic
 def research_product(*, actor, household, item_id, identity=None, provider=None) -> dict:
-    """Fetch and store dated, cited observations for one pantry item."""
-    item = get_pantry_item(actor=actor, item_id=item_id, household=household)
-    provider = provider or get_product_researcher()
-    provider_name = _provider_name(provider)
-    identity = identity or ProductIdentity(name=item.name)
+    """Fetch and store dated, cited research observations for one pantry or gear item."""
+    require_household_member(actor, household.pk)
+    pantry_model = apps.get_model("inventory", "PantryItem")
+    item = (get_pantry_item(actor=actor, item_id=item_id, household=household)
+            if pantry_model.objects.filter(pk=item_id, household=household).exists()
+            else get_gear_item(actor=actor, household=household, item_id=item_id))
+    identity = identity or ProductIdentity(name=item.name, category=getattr(item, "category", ""))
+    provider_name = _provider_name(provider) if provider is not None else "product-research"
     result = {
         "status": "ok",
         "provider": provider_name,
@@ -431,10 +469,21 @@ def research_product(*, actor, household, item_id, identity=None, provider=None)
         "observations": [],
     }
     try:
+        provider = provider or get_product_researcher()
+        provider_name = _provider_name(provider)
+        result["provider"] = provider_name
         observations = _validated_observations(provider.lookup(identity))
     except ProviderError as exc:
         result["status"] = _status_for(exc)
         result["error"] = _bounded(str(exc) or type(exc).__name__, 200)
+        item.research_status = "failed"
+        item.save(update_fields=["research_status", "updated_at"])
+        return result
+    except Exception:
+        result["status"] = "failed"
+        result["error"] = "Research provider failed; inventory was saved."
+        item.research_status = "failed"
+        item.save(update_fields=["research_status", "updated_at"])
         return result
     stored = [_store_observation(item, observation) for observation in observations]
     if stored:
@@ -447,6 +496,25 @@ def research_product(*, actor, household, item_id, identity=None, provider=None)
             after={"provider": provider_name, "sources": [row.source_url for row in stored]},
         )
     result["observations"] = [_public_observation(row) for row in stored]
+    item.research_status = "complete" if stored else "no_results"
+    item.save(update_fields=["research_status", "updated_at"])
+    return result
+
+
+def research_inventory_item(*, actor, household, item) -> dict:
+    """Research an inventory row without allowing provider outages to undo add."""
+    result = research_product(actor=actor, household=household, item_id=item.pk)
+    if item._meta.label_lower == "inventory.pantryitem":
+        try:
+            provider = get_nutrition_provider()
+            nutrition = (
+                {"status": "not_configured", "written": []}
+                if isinstance(provider, NullNutritionProvider)
+                else enrich_nutrition(actor=actor, household=household, item_id=item.pk, provider=provider)
+            )
+        except Exception:
+            nutrition = {"status": "failed", "error": "Nutrition provider failed; inventory was saved."}
+        result["nutrition"] = nutrition
     return result
 
 

@@ -1,8 +1,12 @@
 import ast
+import re
 import uuid
-from datetime import date, timedelta
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 from pathlib import Path
+
+import json
+import subprocess
 
 import pytest
 from django.conf import settings
@@ -62,7 +66,7 @@ def test_empty_overview_is_explicit_instead_of_inventing_inventory(client, owner
     response = client.get(reverse("dashboard"))
     assert response.status_code == 200
     body = response.content
-    assert b"Household overview" in body
+    assert b"CampKit overview" in body
     assert household.name.encode() in body
     assert b"No trips planned yet" in body
     assert b"No gear yet" in body
@@ -120,7 +124,7 @@ def test_overview_surfaces_expiring_pantry_and_verification_backlog_without_leak
     client.force_login(owner)
     body = client.get(reverse("dashboard")).content
     assert b"Fresh eggs" in body
-    assert b"awaiting household confirmation" in body
+    assert b"awaiting confirmation" in body
     assert b"Other household oats" not in body
     assert b"1 open intake question" in body
 
@@ -185,11 +189,13 @@ def test_search_filters_inventory_within_the_household(client, owner, household,
 
 @pytest.mark.django_db
 def test_pantry_detail_shows_sourced_nutrition_and_dated_price_history(client, owner, household, pantry_data):
-    item = create_pantry_item(actor=owner, household=household, data=pantry_data)
+    item = create_pantry_item(actor=owner, household=household, data={**pantry_data, "confidence": Decimal("0.900")})
     create_nutrition_fact(actor=owner, household=household, item_id=item.pk, data={
-        "nutrient": "Protein", "amount": Decimal("12"), "unit": "g",
-        "source": "USDA FoodData Central", "source_url": "https://fdc.nal.usda.gov/food/1",
+        "nutrient": "protein_g", "amount": Decimal("12"), "unit": "g",
+        "source": "USDA FoodData Central — branded product record, matched against the package label and serving-size details",
+        "source_url": "https://fdc.nal.usda.gov/food/1",
         "confidence": Decimal("0.900"),
+        "observed_at": timezone.make_aware(datetime(2024, 1, 2, 3, 4)),
     })
     record_price(item_id=item.pk, amount=Decimal("4.25"), merchant="Camp Store",
                  source="receipt", source_url="https://example.test/receipt",
@@ -200,14 +206,123 @@ def test_pantry_detail_shows_sourced_nutrition_and_dated_price_history(client, o
     assert response.status_code == 200
     body = response.content
     assert b"Nutrition facts" in body
+    assert b"class=\"card pantry-provenance\"" in body
+    assert b"class=\"card pantry-nutrition\"" in body
+    for label in ("Nutrient", "Amount", "Source", "Verification", "Confidence", "Observed", "Merchant", "Freshness"):
+        assert f'data-label="{label}"'.encode() in body
     assert b"Protein" in body
-    assert b"USDA FoodData Central" in body
+    assert b"protein_g" not in body
+    assert "USDA FoodData Central — branded product record".encode() in body
+    assert b">citation</a>" in body
+    assert b"2 Jan 2024 03:04" in body
+    assert b"12 g" in body
+    assert b"12.000 g" not in body
+    assert b"Confidence: 90%" in body
+    assert b"data-label=\"Confidence\">90%</td>" in body
+    assert b"provider confidence is shown as a percentage" in body.lower()
+    assert re.search(rb"\b\d{1,2} [A-Z][a-z]{2} 20\d{2} \d{2}:\d{2}\b", body)
+    assert not re.search(rb"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", body)
     assert b"https://fdc.nal.usda.gov/food/1" in body
     assert b"Price history" in body
     assert b"Camp Store" in body
     assert b"4.25" in body and b"USD" in body
     assert b"stale" in body
     assert b"Package label" in body
+
+
+@pytest.mark.django_db(transaction=True)
+def test_pantry_nutrition_desktop_geometry_fits_without_clipping(live_server, client, owner, household, pantry_data):
+    item = create_pantry_item(actor=owner, household=household, data={**pantry_data, "confidence": Decimal("0.900")})
+    create_nutrition_fact(actor=owner, household=household, item_id=item.pk, data={
+        "nutrient": "protein_g", "amount": Decimal("12"), "unit": "g",
+        "source": "Synthetic browser geometry test", "confidence": Decimal("0.900"),
+    })
+    empty_item = create_pantry_item(actor=owner, household=household, data={**pantry_data, "name": "Empty browser test"})
+    client.force_login(owner)
+    session_cookie = client.cookies[settings.SESSION_COOKIE_NAME].value
+    capture_dir = REPO_ROOT / "task-artifacts-pantrypolish" / "overflow-fix"
+    capture_dir.mkdir(parents=True, exist_ok=True)
+
+    script = """
+const { chromium } = require('/usr/local/lib/hermes-agent/node_modules/playwright');
+(async () => {
+  const browser = await chromium.launch({headless:true});
+  const context = await browser.newContext({viewport:{width:1365,height:1000}});
+  await context.addCookies([{name:process.argv[1],value:process.argv[2],url:process.argv[3]}]);
+  const page = await context.newPage();
+  await page.goto(process.argv[4]);
+  const result = await page.locator('.pantry-nutrition .table-scroll').evaluate(node => {
+    const rect = element => { const r=element.getBoundingClientRect(); return {left:r.left,right:r.right,width:r.width}; };
+    return {viewport:innerWidth,scrollWidth:node.scrollWidth,clientWidth:node.clientWidth,
+      wrapper:rect(node),table:rect(node.querySelector('table')),caption:rect(node.querySelector('caption')),
+      headers:[...node.querySelectorAll('th')].map(element=>({text:element.innerText,...rect(element)})),
+      confidence:[...document.querySelectorAll('.pantry-provenance p,.pantry-nutrition td[data-label="Confidence"]')]
+        .map(element=>element.innerText).filter(text=>text.includes('Confidence')||text.includes('%'))};
+  });
+  await page.screenshot({path:process.argv[5]+'/desktop-populated-fresh.png'});
+  await page.setViewportSize({width:390,height:844});
+  const mobile = await page.evaluate(() => ({documentWidth:document.documentElement.scrollWidth,bodyWidth:document.body.scrollWidth,
+    wrapperClientWidth:document.querySelector('.pantry-nutrition .table-scroll').clientWidth,
+    wrapperScrollWidth:document.querySelector('.pantry-nutrition .table-scroll').scrollWidth,
+    labels:[...document.querySelectorAll('.pantry-nutrition td')].map(cell=>cell.dataset.label)}));
+  await page.screenshot({path:process.argv[5]+'/mobile-populated-fresh.png'});
+  await page.goto(process.argv[6]);
+  const empty = await page.evaluate(() => ({hasNutritionEmpty:document.body.innerText.includes('No nutrition facts recorded yet.'),
+    hasPriceEmpty:document.body.innerText.includes('No price observations recorded yet.')}));
+  await page.screenshot({path:process.argv[5]+'/mobile-empty-fresh.png'});
+  console.log(JSON.stringify({desktop:result,mobile,empty}));
+  await browser.close();
+})().catch(error=>{console.error(error);process.exit(1)});
+"""
+    result = subprocess.run([
+        "node", "-e", script, settings.SESSION_COOKIE_NAME, session_cookie,
+        live_server.url, f"{live_server.url}{reverse('inventory:pantry_detail', args=[item.pk])}",
+        str(capture_dir), f"{live_server.url}{reverse('inventory:pantry_detail', args=[empty_item.pk])}",
+    ], check=True, capture_output=True, text=True)
+    output = json.loads(result.stdout.strip().splitlines()[-1])
+    geometry = output["desktop"]
+    print(f"Chromium geometry: {json.dumps(output, sort_keys=True)}")
+
+    assert geometry["viewport"] == 1365
+    assert geometry["scrollWidth"] <= geometry["clientWidth"], geometry
+    assert geometry["table"]["right"] <= geometry["wrapper"]["right"] + 1, geometry
+    assert geometry["caption"]["left"] >= geometry["wrapper"]["left"] - 1, geometry
+    assert geometry["caption"]["right"] <= geometry["wrapper"]["right"] + 1, geometry
+    assert [header["text"].lower() for header in geometry["headers"]] == [
+        "nutrient", "amount", "source", "verification", "confidence", "observed",
+    ]
+    assert all(header["left"] >= geometry["wrapper"]["left"] - 1 and
+               header["right"] <= geometry["wrapper"]["right"] + 1 for header in geometry["headers"]), geometry
+    assert geometry["confidence"] == ["Confidence: 90%", "90%"], geometry
+    assert output["mobile"]["documentWidth"] == 390, output["mobile"]
+    assert output["mobile"]["bodyWidth"] == 390, output["mobile"]
+    assert output["mobile"]["wrapperScrollWidth"] <= output["mobile"]["wrapperClientWidth"], output["mobile"]
+    assert set(output["mobile"]["labels"]) == {"Nutrient", "Amount", "Source", "Verification", "Confidence", "Observed"}
+    assert output["empty"] == {"hasNutritionEmpty": True, "hasPriceEmpty": True}, output["empty"]
+
+
+@pytest.mark.django_db
+def test_pantry_detail_layout_keeps_headers_and_actions_readable():
+    css = (Path(__file__).resolve().parents[2] / "static" / "css" / "campkit.css").read_text()
+    assert re.search(r"\.pantry-detail-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 2fr\)", css, re.S)
+    assert re.search(r"\.pantry-nutrition\s*\{[^}]*grid-column:\s*1\s*/\s*-1", css, re.S)
+    assert re.search(r"\.pantry-nutrition \.table-scroll th\s*\{[^}]*white-space:\s*nowrap", css, re.S)
+    assert re.search(r"\.actions \.button\s*\{[^}]*min-height:\s*44px", css, re.S)
+
+
+@pytest.mark.django_db
+def test_pantry_detail_shows_empty_nutrition_and_price_states(client, owner, household, pantry_data):
+    item = create_pantry_item(actor=owner, household=household, data=pantry_data)
+    client.force_login(owner)
+
+    response = client.get(reverse("inventory:pantry_detail", args=[item.pk]))
+
+    assert response.status_code == 200
+    body = response.content
+    assert b"No nutrition facts recorded yet." in body
+    assert b"No price observations recorded yet." in body
+    assert b"Confirm quantity" in body
+    assert b"Edit or correct" in body
 
 
 # --------------------------------------------------------------------------- #
@@ -278,7 +393,7 @@ def test_recommendations_are_explained_suggestions_not_inventory(
     body = response.content
     assert b"Recommendations" in body
     assert b"Suggestions only" in body
-    assert b"inventory until a household member adds it" in body
+    assert b"inventory until a member adds it" in body
     assert b"Oatmeal" in body
     assert b"Ridge weekend" in body
     assert b"Confirm 3 estimated facts" in body
@@ -349,7 +464,7 @@ def test_navigation_labels_are_visible_and_marked_for_current_page(client, owner
     assert b'aria-current="page"' in body
     assert b'class="skip-link"' in body
     assert b'id="main"' in body
-    assert b"Private to" in body
+    assert b"Private space:" in body
 
 
 @pytest.mark.django_db

@@ -13,6 +13,13 @@ class InventoryVerification(models.TextChoices):
     CONFIRMED = "confirmed", "Confirmed"
 
 
+class InventoryResearchStatus(models.TextChoices):
+    NOT_STARTED = "not_started", "Not researched"
+    COMPLETE = "complete", "Research complete"
+    NO_RESULTS = "no_results", "No results"
+    FAILED = "failed", "Research unavailable"
+
+
 class HouseholdInventoryManager(models.Manager):
     def for_household(self, household):
         return self.get_queryset().filter(household=household)
@@ -201,6 +208,8 @@ class GearItem(ProvenanceModel):
     quantity = models.PositiveIntegerField(default=1)
     storage_location = models.CharField(max_length=160, blank=True)
     availability = models.CharField(max_length=32, default="available")
+    research_status = models.CharField(max_length=16, choices=InventoryResearchStatus.choices,
+                                       default=InventoryResearchStatus.NOT_STARTED)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -243,6 +252,8 @@ class PantryItem(ProvenanceModel):
     unit = models.CharField(max_length=20)
     expiry_date = models.DateField(null=True, blank=True)
     storage_location = models.CharField(max_length=160, blank=True)
+    research_status = models.CharField(max_length=16, choices=InventoryResearchStatus.choices,
+                                       default=InventoryResearchStatus.NOT_STARTED)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -292,10 +303,38 @@ class NutritionFact(ProvenanceModel):
     amount = models.DecimalField(max_digits=12, decimal_places=3)
     unit = models.CharField(max_length=20)
 
+    CANONICAL_UNITS = {
+        "energy_kcal": "kcal",
+        "protein_g": "g",
+        "fat_g": "g",
+        "carbohydrate_g": "g",
+        "fiber_g": "g",
+        "sugar_g": "g",
+        "sodium_mg": "mg",
+        "saturated_fat_g": "g",
+    }
+    NUTRIENT_LABELS = {
+        "energy_kcal": "Energy",
+        "protein_g": "Protein",
+        "fat_g": "Fat",
+        "carbohydrate_g": "Carbohydrate",
+        "fiber_g": "Fiber",
+        "sugar_g": "Sugar",
+        "sodium_mg": "Sodium",
+        "saturated_fat_g": "Saturated fat",
+    }
+
+    @property
+    def nutrient_label(self):
+        return self.NUTRIENT_LABELS.get(self.nutrient, self.nutrient)
+
     class Meta:
         constraints = [models.UniqueConstraint(fields=("item", "nutrient"), name="unique_item_nutrition_fact")]
 
     def clean(self):
         super().clean()
+        expected_unit = self.CANONICAL_UNITS.get(self.nutrient)
+        if expected_unit is None or self.unit != expected_unit:
+            raise ValidationError({"unit": "Use the canonical unit for this supported nutrition fact."})
         if self.amount < 0:
             raise ValidationError({"amount": "Nutrition amount cannot be negative."})

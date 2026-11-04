@@ -125,7 +125,7 @@ def test_price_observations_are_timestamped_snapshots(owner, household, pantry_d
 def test_nutrition_fact_retains_source_and_confidence(owner, household, pantry_data):
     item = create_pantry_item(actor=owner, household=household, data=pantry_data)
     fact = create_nutrition_fact(actor=owner, household=household, item_id=item.pk, data={
-        "nutrient": "protein", "amount": Decimal("8.2"), "unit": "g", "source": "Label",
+        "nutrient": "protein_g", "amount": Decimal("8.2"), "unit": "g", "source": "Label",
         "source_url": "https://example.test/nutrition", "confidence": Decimal("0.92")
     })
     fact.full_clean()

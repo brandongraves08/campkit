@@ -5,7 +5,7 @@
 {% block content %}
   <div class="page-head">
     <h1>Shared gear</h1>
-    <p class="lede">Everything the household owns together, with who confirmed it and where the details came from.</p>
+    <p class="lede">Shared gear, with who confirmed each item and where its details came from.</p>
   </div>
 
   <div class="summary-strip" aria-label="Gear weight summary">
@@ -38,6 +38,10 @@
             {% if item.storage_location %} · stored in {{ item.storage_location }}{% endif %}
             {% if item.condition %} · {{ item.condition }}{% endif %}
           </p>
+          <p class="provenance">Research: {{ item.get_research_status_display }}</p>
+          {% for observation in item.research_observations.all %}
+            <p class="provenance">{{ observation.title }}{% if observation.brand %} · Brand: {{ observation.brand }}{% endif %}{% if observation.barcode %} · Barcode: {{ observation.barcode }}{% endif %}{% if observation.summary %} — {{ observation.summary }}{% endif %} · {{ observation.provider }} · {{ observation.retrieved_at|date:"j M Y" }} · confidence {{ observation.confidence }} · <a href="{{ observation.source_url }}" rel="noreferrer noopener">source</a></p>
+          {% endfor %}
           <p class="provenance">
             {% if item.source %}Source: {{ item.source }}{% if item.source_url %} (<a href="{{ item.source_url }}" rel="noreferrer noopener">details</a>){% endif %}{% else %}No source recorded.{% endif %}
             · observed {{ item.observed_at|date:"j M Y" }}
@@ -46,13 +50,14 @@
           </p>
           <div class="actions">
             <a class="button" href="{% url 'inventory:gear_edit' item.pk %}">Edit</a>
+            <form class="inline-form" method="post" action="{% url 'inventory:gear_research_retry' item.pk %}">{% csrf_token %}<button class="button" type="submit">Research again</button></form>
             {% if item.verification_status == "estimated" %}
               <form class="inline-form" method="post" action="{% url 'inventory:gear_confirm' item.pk %}">
                 {% csrf_token %}
                 <button class="button button-primary" type="submit">Confirm details</button>
               </form>
             {% endif %}
-            <form class="inline-form" method="post" action="{% url 'inventory:gear_delete' item.pk %}" data-confirm="Delete this gear item from the household?">
+            <form class="inline-form" method="post" action="{% url 'inventory:gear_delete' item.pk %}" data-confirm="Delete this shared gear item?">
               {% csrf_token %}
               <button class="button button-danger" type="submit">Delete</button>
             </form>
