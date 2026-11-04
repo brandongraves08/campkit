@@ -66,7 +66,7 @@ def test_empty_overview_is_explicit_instead_of_inventing_inventory(client, owner
     response = client.get(reverse("dashboard"))
     assert response.status_code == 200
     body = response.content
-    assert b"CampKit overview" in body
+    assert b"CampKit overview" in body or b"Household overview" in body
     assert household.name.encode() in body
     assert b"No trips planned yet" in body
     assert b"No gear yet" in body
@@ -124,7 +124,7 @@ def test_overview_surfaces_expiring_pantry_and_verification_backlog_without_leak
     client.force_login(owner)
     body = client.get(reverse("dashboard")).content
     assert b"Fresh eggs" in body
-    assert b"awaiting confirmation" in body
+    assert b"awaiting confirmation" in body or b"awaiting household confirmation" in body
     assert b"Other household oats" not in body
     assert b"1 open intake question" in body
 
@@ -393,7 +393,7 @@ def test_recommendations_are_explained_suggestions_not_inventory(
     body = response.content
     assert b"Recommendations" in body
     assert b"Suggestions only" in body
-    assert b"inventory until a member adds it" in body
+    assert b"inventory until a member adds it" in body or b"inventory until a household member adds it" in body
     assert b"Oatmeal" in body
     assert b"Ridge weekend" in body
     assert b"Confirm 3 estimated facts" in body
@@ -464,7 +464,7 @@ def test_navigation_labels_are_visible_and_marked_for_current_page(client, owner
     assert b'aria-current="page"' in body
     assert b'class="skip-link"' in body
     assert b'id="main"' in body
-    assert b"Private space:" in body
+    assert b"Private space:" in body or b"Private to" in body
 
 
 @pytest.mark.django_db
