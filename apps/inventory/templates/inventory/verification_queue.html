@@ -5,7 +5,7 @@
 {% block content %}
   <div class="page-head">
     <h1>Verification queue</h1>
-    <p class="lede">Facts a household member still has to confirm. Estimated rows stay visible but cannot be reserved as guaranteed trip stock.</p>
+    <p class="lede">Facts that still need confirmation. Estimated rows stay visible but cannot be reserved as guaranteed trip stock.</p>
   </div>
 
   <p class="summary-strip"><strong>{{ backlog.total }}</strong>&nbsp;estimated fact{{ backlog.total|pluralize }} await confirmation</p>
@@ -77,5 +77,5 @@
     {% endif %}
   </section>
 
-  <p class="fine">Confirming records your household account and time on the fact. A later material edit returns it to estimated.</p>
+  <p class="fine">Confirmation records your account and the time. A later material edit returns the fact to estimated.</p>
 {% endblock %}

@@ -1,6 +1,6 @@
 # CampKit deployment (single host, private network)
 
-CampKit is a self-hosted household app with self-registration and invitation-based household sharing. This deployment is one
+CampKit is a self-hosted planning app with self-registration and invitation-based space sharing. This deployment is one
 Compose stack on one host:
 
 | Service | Image | Purpose | Reaches the network |
@@ -58,17 +58,17 @@ deploy/README.md    this file
    docker compose logs -f web
    ```
 
-3. Create the first user and household at `/accounts/signup/` through the internal
-   HTTPS hostname. The form creates a new private household and gives that user
-   the owner role; there is no seed command. A household member joins an existing
-   household only by following its owner's invitation link.
+3. Create the first user and private space at `/accounts/signup/` through the internal
+   HTTPS hostname. The form creates a new private space and gives that user
+   the owner role; there is no seed command. A member joins an existing
+   space only by following its owner's invitation link.
 
    Owners issue invitations from the authenticated app with
    `POST /accounts/invitations/` (form field `email`). The recipient uses
    `https://<host>/accounts/signup/<token>/` and must use the invited email
    address. New recipients create an account there; existing account holders sign
-   in, explicitly accept the invitation, and can switch between their households
-   from the app header. Data remains scoped to the selected household.
+   in, explicitly accept the invitation, and can switch between their spaces
+   from the app header. Data remains scoped to the selected space.
 
 ## Secrets
 
@@ -94,7 +94,7 @@ Three named volumes:
 
 `CAMPKIT_DATA_DIR=/data` is set for `web`, so every mutable app file lives on
 `campkit_data`. Photos are never served by Django's static or media handlers;
-they are streamed only by the authenticated, household-scoped intake view.
+they are streamed only by the authenticated, space-scoped intake view.
 
 ## Reverse proxy
 
@@ -179,7 +179,7 @@ docker compose logs --tail=50 web
 Then sign in and spot-check the pantry, the verification queue, and one intake
 photo. Restore into a throwaway stack first when rehearsing
 (`docker compose -p campkit-rehearsal ...` with separate volumes) — never
-rehearse against the household's only copy.
+rehearse against the only copy of your data.
 
 ## Upgrades
 
@@ -201,8 +201,8 @@ Deployment checks were performed on 2026-11-03; the isolated restore rehearsal u
 | --- | --- | --- |
 | Local automated checks | **passed** | Full pytest suite: 236 passed; Django system check under test settings and `git diff --check` passed |
 | HTTPS login/signup pages | **passed** | The live internal route returned HTTP 200 |
-| Disposable self-registration/login, invitation acceptance, and household switching | **passed** | Exercised over internal HTTPS; synthetic users and households were readback-verified removed. Live trip/gear/pantry/meal creation was not separately exercised |
-| Case-insensitive login ambiguity and household-selection regressions | **passed** | Covered by automated tests; not claimed as a live mixed-case login check |
+| Disposable self-registration/login, invitation acceptance, and space switching | **passed** | Exercised over internal HTTPS; synthetic users and spaces were readback-verified removed. Live trip/gear/pantry/meal creation was not separately exercised |
+| Case-insensitive login ambiguity and space-selection regressions | **passed** | Covered by automated tests; not claimed as a live mixed-case login check |
 | Isolated backup-restore rehearsal | **passed** | Backup passed SHA-256 and gzip checks; PostgreSQL restore in an isolated stack matched table row counts. The media archive restored without files; no production records were modified |
 | Deployment-backed MCP smoke call and optional external-provider integrations | **not run** | These integrations were outside the live app-flow check and need separate verification before use |
 
@@ -212,13 +212,13 @@ Local tests and checks do not substitute for separate live verification of optio
 
 - `web` runs as the unprivileged `campkit` user (uid 10001) with
   `no-new-privileges`; both services bind to loopback only.
-- Self-registration creates a new private household with the registering user
-  as OWNER; an invitation is required to join an existing household. Household-
-  scoped records and the audit trail are enforced in the application; the
+- Self-registration creates a new private space with the registering user
+  as OWNER; an invitation is required to join an existing space. Space-scoped
+  records and the audit trail are enforced in the application; the
   container adds no bypass. The signup flow has no email verification or request
   throttling, so keep the reverse proxy restricted to a trusted network/VPN and
   never expose the route publicly without a separate security review.
-- Only item photos are sent to a configured vision provider, and only because
-  the household authorizes it. No other household data leaves the host.
+- Only item photos are sent to a configured vision provider, and only when an
+  authorized member permits it. No other user data leaves the host.
 - Nothing here deploys publicly, purchases anything, or automates destructive
   bulk changes; those remain human actions.

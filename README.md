@@ -1,14 +1,14 @@
 # CampKit
 
-**A private, household-scoped planner for camping trips, shared gear, and pantry stock.** CampKit brings trip readiness and inventory together while keeping estimates visibly separate from facts a household member has confirmed.
+**A private planner for camping trips, shared gear, and pantry stock.** CampKit brings trip readiness and inventory together while keeping estimates visibly separate from facts a member has confirmed.
 
-> CampKit is an early, self-hosted project, not a public service. The internal deployment has passed disposable signup/login, invitation acceptance, and household-switching checks; an isolated backup-restore rehearsal also passed. Live trip/gear/pantry/meal creation was not separately tested. See [project status and limitations](#status-and-limitations) and the [deployment guide](deploy/README.md).
+> CampKit is an early, self-hosted project, not a public service. The internal deployment has passed disposable signup/login, invitation acceptance, and space-switching checks; an isolated backup-restore rehearsal also passed. Live trip/gear/pantry/meal creation was not separately tested. See [project status and limitations](#status-and-limitations) and the [deployment guide](deploy/README.md).
 
 ## See CampKit
 
-These are real browser captures of CampKit running locally against an isolated SQLite database seeded only with fictional household, trip, gear, pantry, and intake records. No production service, credentials, or household data was used.
+These are real browser captures of CampKit running locally against an isolated SQLite database seeded only with fictional account-space, trip, gear, pantry, and intake records. No production service, credentials, or real user data was used.
 
-![CampKit household overview with sample trip readiness, verification status, pantry, and shared inventory](docs/screenshots/dashboard.png)
+![CampKit overview with sample trip readiness, verification status, pantry, and shared inventory](docs/screenshots/dashboard.png)
 
 *The overview brings trip readiness, pending verification, pantry dates, and shared inventory together.*
 
@@ -20,24 +20,24 @@ These are real browser captures of CampKit running locally against an isolated S
 
 *The pantry keeps source details visible and clearly labels unconfirmed quantities.*
 
-![CampKit smart intake review queue with a synthetic item awaiting household verification](docs/screenshots/smart-intake.png)
+![CampKit smart intake review queue with a synthetic item awaiting member verification](docs/screenshots/smart-intake.png)
 
-*Uncertain intake stays in the household review queue instead of silently becoming trusted stock.*
+*Uncertain intake stays in the review queue instead of silently becoming trusted stock.*
 
 ## What you can do
 
 - **Plan trips:** record dates, destination, party size, and conditions; add shared gear and track packed items and readiness.
-- **Track household gear and pantry items:** search and edit records, retain source/provenance, and see estimates separately from confirmed facts. Only confirmed pantry quantities are treated as guaranteed stock.
-- **Review intake:** submit a photo or barcode for optional provider-backed recognition. Candidates below confidence thresholds are held for household review; manual entry remains available when providers are not configured.
+- **Track gear and pantry items:** search and edit records, retain source/provenance, and see estimates separately from confirmed facts. Only confirmed pantry quantities are treated as guaranteed stock.
+- **Review intake:** submit a photo or barcode for optional provider-backed recognition. Candidates below confidence thresholds are held for member review; manual entry remains available when providers are not configured.
 - **Plan meals and stock reservations:** associate meals and ingredients with a trip, then confirm a meal plan to reserve available confirmed pantry stock.
-- **See sourced suggestions:** recommendations are explanatory suggestions, not inventory until a household member adds them.
-- **Keep an audit trail:** household changes record the actor and action.
+- **See sourced suggestions:** recommendations are explanatory suggestions, not inventory until a member adds them.
+- **Keep an audit trail:** changes record the actor and action.
 
 ## Architecture
 
-CampKit is a server-rendered **Django 5.2** application (Python **3.12+**) organized into domain apps for households, inventory, trips, meals, intake, enrichment, audit, and integrations. PostgreSQL is the configured application database; the test settings use disposable SQLite. The web UI uses Django templates and static CSS/JavaScript. `compose.yaml` runs the web app with Gunicorn and PostgreSQL 16; see [deployment](deploy/README.md) for the full topology and operator steps.
+CampKit is a server-rendered **Django 5.2** application (Python **3.12+**) organized into domain apps for accounts, inventory, trips, meals, intake, enrichment, audit, and integrations. PostgreSQL is the configured application database; the test settings use disposable SQLite. The web UI uses Django templates and static CSS/JavaScript. `compose.yaml` runs the web app with Gunicorn and PostgreSQL 16; see [deployment](deploy/README.md) for the full topology and operator steps.
 
-The repository also includes a versioned REST API (`/api/v1/`) and a JSON-RPC stdio MCP server for Hermes. These adapters delegate to shared domain services, so they apply the same household boundaries and business rules as the UI. MCP exposes an allowlist of tools; sensitive mutations require explicit confirmation, and destructive bulk/delete/purchase actions are not exposed. See `apps/api/`, `apps/mcp/`, and their tests. The MCP server is started as a local subprocess by an operator; this repository does not register it with Hermes automatically.
+The repository also includes a versioned REST API (`/api/v1/`) and a JSON-RPC stdio MCP server for Hermes. These adapters delegate to shared domain services, so they apply the same account access boundaries and business rules as the UI. MCP exposes an allowlist of tools; sensitive mutations require explicit confirmation, and destructive bulk/delete/purchase actions are not exposed. See `apps/api/`, `apps/mcp/`, and their tests. The MCP server is started as a local subprocess by an operator; this repository does not register it with Hermes automatically.
 
 ## Local development
 
@@ -60,7 +60,7 @@ python manage.py createsuperuser
 python manage.py runserver 127.0.0.1:8000
 ```
 
-The test settings use a test-only secret and disable secure-cookie/HTTPS redirects for local use. The test database contains only data you create locally; do not point `CAMPKIT_TEST_DB` at household data. Household pages require a household membership, so a superuser alone is not a substitute for household bootstrap. Self-registration at `/accounts/signup/` creates a private household owned by the registrant. To join another household, follow its owner's invitation; existing account holders sign in to accept it and can switch households from the app header.
+The test settings use a test-only secret and disable secure-cookie/HTTPS redirects for local use. The test database contains only data you create locally; do not point `CAMPKIT_TEST_DB` at real user data. App pages require access to a private space, so a superuser alone is not a substitute for setting one up. Self-registration at `/accounts/signup/` creates a private space owned by the registrant. To join another space, follow its owner's invitation; existing account holders sign in to accept it and can switch spaces from the app header.
 
 Useful checks:
 
@@ -69,26 +69,26 @@ pytest -q
 python manage.py check --settings=config.settings_test
 ```
 
-The suite includes server-rendered UI/accessibility smoke tests, household isolation, intake, API/MCP behavior, and end-to-end flows. It uses SQLite test settings by default; some deployment checks require a real container stack and are intentionally separate.
+The suite includes server-rendered UI/accessibility smoke tests, private-space isolation, intake, API/MCP behavior, and end-to-end flows. It uses SQLite test settings by default; some deployment checks require a real container stack and are intentionally separate.
 
 ## Privacy and security boundaries
 
-- **New accounts get a private household; owners invite people to join existing households.** Signed-in users can switch only between their memberships, and pages and records stay scoped to the selected household. Do not expose the service publicly without reviewing the [deployment security model](deploy/README.md#security-notes).
-- Intake images are kept in a private data directory and served only through authenticated household-scoped views. A configured vision provider receives item photos only when the household authorizes that processing; provider credentials are optional. With no provider configured, the null provider does not invent data and manual entry remains available.
+- **New accounts get a private space; owners invite people to join existing spaces.** Signed-in users can switch only between their memberships, and pages and records stay scoped to the selected space. Do not expose the service publicly without reviewing the [deployment security model](deploy/README.md#security-notes).
+- Intake images are kept in a private data directory and served only through authenticated, space-scoped views. A configured vision provider receives item photos only when an authorized member allows that processing; provider credentials are optional. With no provider configured, the null provider does not invent data and manual entry remains available.
 - The REST API and MCP integration authenticate through a dedicated service identity; mutations are attributed to that identity in the audit trail. Review confirmation prompts before allowing sensitive actions.
 - The included Compose deployment binds its web and database ports to host loopback and expects a TLS-terminating trusted-network/VPN reverse proxy. Operators must manage secrets, proxy/static-file configuration, backups, and access to that host. See [`deploy/README.md`](deploy/README.md).
 
 ## Integrations
 
-- **REST API:** versioned household endpoints are mounted under `/api/v1/` for trips, gear, pantry, intake, and verification. Authentication and permission checks are enforced in the API layer. The repository's `tests/api/` suite is the best current reference for request behavior.
-- **Hermes MCP:** the stdio JSON-RPC server exposes household tools for trips, gear, pantry, verification, meal planning, intake review, and sourced price observations. Sensitive writes are confirmation-gated. The service identity and optional integration settings are described in `.env.example` and `apps/mcp/`.
+- **REST API:** versioned private-space endpoints are mounted under `/api/v1/` for trips, gear, pantry, intake, and verification. Authentication and permission checks are enforced in the API layer. The repository's `tests/api/` suite is the best current reference for request behavior.
+- **Hermes MCP:** the stdio JSON-RPC server exposes tools for trips, gear, pantry, verification, meal planning, intake review, and sourced price observations. Sensitive writes are confirmation-gated. The service identity and optional integration settings are described in `.env.example` and `apps/mcp/`.
 - **Optional enrichment:** nutrition and product research providers can be configured. The shipped providers may require external credentials/services; absent optional credentials do not make manual records unavailable. Treat sourced or cached enrichment as dated evidence, not a guarantee of current price or availability.
 
 ## Status and limitations
 
-CampKit is an early, self-hosted household tool, not a managed or public cloud product. You operate the application, database, secrets, reverse proxy, and backups. A live disposable flow through the internal deployment covered self-registration/login, invitation acceptance into a second household, and household switching; the synthetic users and households were readback-verified as removed afterward. Live trip/gear/pantry/meal creation was not separately exercised. An isolated backup-restore rehearsal passed; see the [deployment verification record](deploy/README.md#verification-status-of-this-deployment). Case-insensitive login ambiguity and household switching are covered by automated regression tests; optional provider-backed integrations and other untested workflows still need separate validation. Provider-backed photo recognition, nutrition, and research depend on optional integrations and confidence thresholds; suggestions and unconfirmed records are not authoritative facts. Self-registration creates a private household owned by the registering account. Users join an existing household by accepting its owner's invitation and can switch among their memberships from the app header. There is no automatic purchasing, and the Hermes tool allowlist exposes no destructive bulk mutation.
+CampKit is an early, self-hosted tool, not a managed or public cloud product. You operate the application, database, secrets, reverse proxy, and backups. A live disposable flow through the internal deployment covered self-registration/login, invitation acceptance into a second private space, and space switching; the synthetic accounts and spaces were readback-verified as removed afterward. Live trip/gear/pantry/meal creation was not separately exercised. An isolated backup-restore rehearsal passed; see the [deployment verification record](deploy/README.md#verification-status-of-this-deployment). Case-insensitive login ambiguity and space switching are covered by automated regression tests; optional provider-backed integrations and other untested workflows still need separate validation. Provider-backed photo recognition, nutrition, and research depend on optional integrations and confidence thresholds; suggestions and unconfirmed records are not authoritative facts. Self-registration creates a private space owned by the registering account. Users join an existing space by accepting its owner's invitation and can switch among their memberships from the app header. There is no automatic purchasing, and the Hermes tool allowlist exposes no destructive bulk mutation.
 
-Before using real household data, read the [deployment guide](deploy/README.md), configure a trusted private ingress and durable backups, and independently verify the deployment on your own host.
+Before using real user data, read the [deployment guide](deploy/README.md), configure a trusted private ingress and durable backups, and independently verify the deployment on your own host.
 
 ## Project references
 

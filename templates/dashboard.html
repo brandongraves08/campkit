@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}Household overview · CampKit{% endblock %}
+{% block title %}CampKit overview{% endblock %}
 
 {% block content %}
   <div class="page-head">
-    <h1>Household overview</h1>
-    <p class="lede">What needs a decision next: the upcoming trip, shared gear and pantry stock, and the facts still waiting for a household member.</p>
+    <h1>CampKit overview</h1>
+    <p class="lede">What needs a decision next: the upcoming trip, shared gear and pantry stock, and facts still waiting for a member.</p>
   </div>
 
   <div class="grid">
@@ -39,7 +39,7 @@
     <article class="card" aria-labelledby="verification-heading">
       <h2 id="verification-heading">Needs verification</h2>
       {% if backlog.total %}
-        <p><strong>{{ backlog.total }}</strong> fact{{ backlog.total|pluralize }} awaiting household confirmation.</p>
+        <p><strong>{{ backlog.total }}</strong> fact{{ backlog.total|pluralize }} awaiting confirmation.</p>
         <p class="fine">Only confirmed quantities count as guaranteed trip stock.</p>
         <div class="button-row">
           <a class="button button-primary" href="{% url 'inventory:verification_queue' %}">Review verification queue</a>
@@ -85,7 +85,7 @@
         {% if gear_count %}{{ gear_count }} gear item{{ gear_count|pluralize }}{% else %}No gear yet{% endif %}
         · {% if pantry_count %}{{ pantry_count }} pantry item{{ pantry_count|pluralize }}{% else %}No pantry items yet{% endif %}
       </p>
-      <p class="fine">Food is private to the household and every row keeps its source and verification state.</p>
+      <p class="fine">Food is private to your space and every row keeps its source and verification state.</p>
       <div class="button-row">
         <a class="button" href="{% url 'inventory:gear_list' %}">Open gear</a>
         <a class="button" href="{% url 'inventory:pantry_list' %}">Open pantry</a>
@@ -111,7 +111,7 @@
           </article>
         {% endfor %}
       </div>
-      <p class="fine">Suggestions only — nothing here is inventory until a household member adds it.</p>
+      <p class="fine">Suggestions only — nothing here is inventory until a member adds it.</p>
     {% else %}
       <p class="empty-state">No recommendations right now. Add a trip or inventory and CampKit will explain what needs attention.</p>
     {% endif %}
@@ -125,7 +125,7 @@
       <ul class="item-list">
         {% for change in recent_changes %}
           <li>
-            <p class="meta"><strong>{{ change.action }}</strong> · {{ change.object_type|default:"household record" }} · {{ change.actor }} · {{ change.created_at|date:"j M Y H:i" }}</p>
+            <p class="meta"><strong>{{ change.action }}</strong> · {{ change.object_type|default:"record" }} · {{ change.actor }} · {{ change.created_at|date:"j M Y H:i" }}</p>
           </li>
         {% endfor %}
       </ul>

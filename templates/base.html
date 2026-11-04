@@ -18,7 +18,7 @@
         {% endif %}
         {% if user.is_authenticated %}
           {% if household %}
-            <p class="scope-note">Private to <strong>{{ household.name }}</strong>{% if household_role %} · {{ household_role }} access{% endif %}</p>
+            <p class="scope-note">Private space: <strong>{{ household.name }}</strong>{% if household_role %} · {{ household_role }} access{% endif %}</p>
             <nav class="site-nav" aria-label="Primary">
               <ul>
                 <li><a href="{% url 'dashboard' %}"{% if nav == "overview" %} aria-current="page"{% endif %}>Overview</a></li>
@@ -34,7 +34,7 @@
           {% if household_choices|length > 1 %}
             <form class="household-switcher" method="post" action="{% url 'select_household' %}">
               {% csrf_token %}
-              <label for="active-household">Household</label>
+              <label for="active-household">Space</label>
               <select id="active-household" name="household_id">
                 {% for choice in household_choices %}<option value="{{ choice.household.pk }}"{% if choice.selected %} selected{% endif %}>{{ choice.household.name }}</option>{% endfor %}
               </select>
@@ -61,7 +61,7 @@
     </main>
     <footer class="site-footer">
       <div class="shell">
-        <p>CampKit keeps this household's records private. Estimates stay labelled until a household member confirms them.</p>
+        <p>CampKit keeps these records private. Estimates stay labelled until a member confirms them.</p>
       </div>
     </footer>
     <script src="{% static 'js/campkit.js' %}" defer></script>

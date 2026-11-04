@@ -102,8 +102,8 @@ def test_self_signup_form_is_linked_from_login(client: Client):
 def test_valid_invitation_creates_member_and_consumes_invitation(client, invitation):
     invitation_page = client.get(f"/accounts/signup/{invitation.token}/")
     assert invitation_page.status_code == 200
-    assert b"Join your CampKit household" in invitation_page.content
-    assert b"starts a new private household" not in invitation_page.content
+    assert b"Join a CampKit space" in invitation_page.content
+    assert b"starts a private space" not in invitation_page.content
     response = client.post(
         f"/accounts/signup/{invitation.token}/",
         {
@@ -143,7 +143,7 @@ def test_existing_user_can_accept_invitation_and_switch_households(
     assert login["Location"] == invitation_url
 
     accept_page = client.get(invitation_url)
-    assert b"Accept household invitation" in accept_page.content
+    assert b"Accept invitation" in accept_page.content
     accepted = client.post(invitation_url, {})
     assert accepted.status_code == 302
 
@@ -261,7 +261,7 @@ def test_multi_household_login_preserves_invitation_next(
     assert login["Location"] == invitation_url
     assert "active_household_id" not in client.session
 
-    assert b"Accept household invitation" in client.get(invitation_url).content
+    assert b"Accept invitation" in client.get(invitation_url).content
     accepted = client.post(invitation_url, {})
     assert accepted.status_code == 302
     assert (
@@ -383,7 +383,7 @@ def test_invalid_active_household_session_shows_recovery_link(
 
     response = client.get("/")
     assert response.status_code == 403
-    assert b"Choose a household" in response.content
+    assert b"Choose a space" in response.content
     assert b"/accounts/households/select/" in response.content
 
 

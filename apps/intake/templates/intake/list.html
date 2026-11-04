@@ -5,7 +5,7 @@
 {% block content %}
   <div class="page-head">
     <h1>Smart intake</h1>
-    <p class="lede">Photos and barcodes become estimated records automatically only when confidence is high. Uncertain identity, quantity, nutrition, or allergens stop here for a household member to review.</p>
+    <p class="lede">Photos and barcodes become estimated records automatically only when confidence is high. Uncertain identity, quantity, nutrition, or allergens stop here for a member to review.</p>
   </div>
 
   <div class="button-row">
@@ -45,7 +45,7 @@
             </div>
             <p class="meta">
               {% if submission.attempts %}Attempts: {{ submission.attempts }} · {% endif %}
-              {% if submission.failure_reason %}{{ submission.failure_reason }}{% else %}Private original kept with the household.{% endif %}
+              {% if submission.failure_reason %}{{ submission.failure_reason }}{% else %}Private original kept in your space.{% endif %}
             </p>
           </li>
         {% endfor %}

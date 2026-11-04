@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 
-{% block title %}Choose a household · CampKit{% endblock %}
+{% block title %}Choose a space · CampKit{% endblock %}
 
 {% block content %}
   <section class="card auth-card">
-    <h1>Choose a household</h1>
-    <p class="fine">Your account belongs to more than one household. Choose which private space to open.</p>
+    <h1>Choose a space</h1>
+    <p class="fine">Your account has access to more than one private space. Choose which one to open.</p>
     <form method="post" action="{% url 'select_household' %}">
       {% csrf_token %}
-      <label for="household-choice">Household</label>
+      <label for="household-choice">Space</label>
       <select id="household-choice" name="household_id" required>
         {% for membership in memberships %}
           <option value="{{ membership.household_id }}">{{ membership.household.name }} · {{ membership.get_role_display }}</option>

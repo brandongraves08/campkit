@@ -6,7 +6,7 @@
   <p><a href="{% url 'intake:list' %}">← Smart intake</a></p>
   <div class="page-head">
     <h1>Intake review</h1>
-    <p class="lede">Status: <strong>{{ submission.get_status_display }}</strong>. Nothing here counts as confirmed inventory until a household member approves or corrects it.</p>
+    <p class="lede">Status: <strong>{{ submission.get_status_display }}</strong>. Nothing here counts as confirmed inventory until a member approves or corrects it.</p>
   </div>
 
   {% if submission.image_key %}
@@ -67,7 +67,7 @@
   {% if submission.status == "needs_review" or submission.status == "pending" %}
     <section class="card" aria-labelledby="correct-heading">
       <h2 id="correct-heading">Correct and confirm manually</h2>
-      <p class="fine">Corrections are recorded as a manual confirmation with your household account as the verifier.</p>
+      <p class="fine">Corrections are recorded as a manual confirmation under your account.</p>
       <form method="post" action="{% url 'intake:resolve' submission.pk %}">
         {% csrf_token %}
         <div class="field">
