@@ -9,13 +9,14 @@ from django.views.decorators.http import require_http_methods, require_POST
 from apps.households.permissions import current_household
 from apps.inventory.services import list_gear
 from apps.trips.forms import GearKitForm, SaveGearKitForm, SeedTripGearForm
-from apps.trips.models import GearKitItem, Trip, TripGear
+from apps.trips.models import GearKit, GearKitItem, Trip, TripGear
 from apps.trips.services import (
     add_trip_gear,
     cancel_trip,
     create_gear_kit_from_trip,
     create_trip,
     delete_gear_kit,
+    get_seed_source_snapshot_token,
     list_gear_kits,
     list_trips,
     remove_trip_gear,
@@ -95,10 +96,19 @@ def trip_gear_seed(request, trip_id):
             source_rows = list(GearKitItem.objects.filter(kit_id=pk).select_related("gear_item").order_by("pk"))
         else:
             source_rows = list(TripGear.objects.filter(trip_id=pk).select_related("gear_item").order_by("pk"))
+    snapshot = ""
+    if selected:
+        try:
+            snapshot = get_seed_source_snapshot_token(
+                actor=request.user, target_trip_id=trip.pk, source_kind=selected[0], source_id=selected[1]
+            )
+        except (GearKit.DoesNotExist, Trip.DoesNotExist, ValidationError):
+            selected = None
     form = SeedTripGearForm(
         request.POST or None, sources=sources, source_rows=source_rows,
-        initial={"source_kind": source_kind, "source_id": source_id},
+        initial={"source_kind": source_kind, "source_id": source_id, "source_snapshot": snapshot},
     )
+    source_changed = False
     if request.method == "POST" and form.is_valid():
         chosen = (form.cleaned_data["source_kind"], form.cleaned_data["source_id"])
         if not any(kind == chosen[0] and str(pk) == chosen[1] for kind, pk, _label in sources):
@@ -106,15 +116,22 @@ def trip_gear_seed(request, trip_id):
         elif request.POST.get("choose_source"):
             form = SeedTripGearForm(
                 sources=sources, source_rows=source_rows,
-                initial={"source_kind": chosen[0], "source_id": chosen[1]},
+                initial={
+                    "source_kind": chosen[0], "source_id": chosen[1],
+                    "source_snapshot": get_seed_source_snapshot_token(
+                        actor=request.user, target_trip_id=trip.pk,
+                        source_kind=chosen[0], source_id=chosen[1],
+                    ),
+                },
             )
         else:
             try:
                 result = seed_trip_gear(
                     actor=request.user, target_trip_id=trip.pk, source_kind=chosen[0], source_id=chosen[1],
-                    selections=form.selected_items(),
+                    selections=form.selected_items(), source_snapshot=form.cleaned_data["source_snapshot"],
                 )
             except ValidationError as exc:
+                source_changed = any("source changed" in message.lower() for message in exc.messages)
                 _add_validation_error(form, exc)
             else:
                 note = f"{result.added} item{'s' if result.added != 1 else ''} added"
@@ -127,6 +144,7 @@ def trip_gear_seed(request, trip_id):
         "seed_rows": [{"gear": row.gear_item, "include": form[f"include_{row.gear_item.pk}"],
                        "quantity": form[f"quantity_{row.gear_item.pk}"]} for row in source_rows],
         "source_rows": source_rows, "has_sources": bool(sources), "source_selected": bool(selected),
+        "source_changed": source_changed,
     })
 
 

@@ -930,7 +930,7 @@ def test_seed_trip_gear_keeps_multi_household_sources_inside_the_target_househol
         actor=other_owner, household=other_household, entries=[(foreign_gear, 1)]
     )
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(GearKit.DoesNotExist, match="Gear kit not found"):
         trip_services.seed_trip_gear(
             actor=owner,
             target_trip_id=target.pk,
@@ -938,13 +938,85 @@ def test_seed_trip_gear_keeps_multi_household_sources_inside_the_target_househol
             source_id=foreign_kit.pk,
             selections=[(foreign_gear.pk, 1)],
         )
-    with pytest.raises(ValidationError):
+    with pytest.raises(Trip.DoesNotExist, match="Trip not found"):
         trip_services.seed_trip_gear(
             actor=owner,
             target_trip_id=target.pk,
             source_kind="completed_trip",
             source_id=foreign_trip.pk,
             selections=[(foreign_gear.pk, 1)],
+        )
+    assert not TripGear.objects.filter(trip=target).exists()
+
+
+def test_multi_household_foreign_and_unknown_source_ids_are_indistinguishable(
+    owner, other_owner, household, other_household
+):
+    Membership.objects.create(user=owner, household=other_household, role=MembershipRole.MEMBER)
+    target = create_trip(actor=owner, household=household, data={"name": "Target"})
+    foreign_gear = _gear_item(other_household, "Foreign tent")
+    foreign_kit, _ = _kit_with_rows(actor=other_owner, household=other_household, entries=[(foreign_gear, 1)])
+    foreign_trip, _ = _completed_source_trip(actor=other_owner, household=other_household, entries=[(foreign_gear, 1)])
+    unknown = uuid.uuid4()
+    for kind, foreign_id, exc_type, message in (
+        ("kit", foreign_kit.pk, GearKit.DoesNotExist, "Gear kit not found."),
+        ("completed_trip", foreign_trip.pk, Trip.DoesNotExist, "Trip not found."),
+    ):
+        signatures = [_exception_signature(lambda source_id=source_id: trip_services.seed_trip_gear(
+            actor=owner, target_trip_id=target.pk, source_kind=kind,
+            source_id=source_id, selections=[(foreign_gear.pk, 1)],
+        )) for source_id in (foreign_id, unknown)]
+        assert signatures == [(exc_type, message), (exc_type, message)]
+    assert not TripGear.objects.filter(trip=target).exists()
+
+
+@pytest.mark.parametrize("changed", ["kit_quantity", "source_metadata", "gear_name"])
+def test_seed_rejects_changed_signed_source_snapshot_atomically(owner, household, changed):
+    target = create_trip(actor=owner, household=household, data={"name": "Target"})
+    tent, stove = _gear_item(household, "Tent"), _gear_item(household, "Stove")
+    kit, _ = _kit_with_rows(actor=owner, household=household, entries=[(tent, 2), (stove, 1)])
+    token = trip_services.get_seed_source_snapshot_token(
+        actor=owner, target_trip_id=target.pk, source_kind="kit", source_id=kit.pk
+    )
+    if changed == "kit_quantity":
+        GearKitItem.objects.filter(kit=kit, gear_item=stove).update(quantity=4)
+    elif changed == "source_metadata":
+        kit.name = "Changed kit"
+        kit.save(update_fields=["name"])
+    else:
+        tent.name = "Changed tent"
+        tent.save(update_fields=["name"])
+    with pytest.raises(ValidationError, match="source changed"):
+        trip_services.seed_trip_gear(
+            actor=owner, target_trip_id=target.pk, source_kind="kit", source_id=kit.pk,
+            selections=[(tent.pk, 1), (stove.pk, 1)], source_snapshot=token,
+        )
+    assert not TripGear.objects.filter(trip=target).exists()
+
+
+def test_seed_rejects_changed_trip_row_state_and_deleted_source_row(owner, household):
+    target = create_trip(actor=owner, household=household, data={"name": "Target"})
+    tent, stove = _gear_item(household, "Tent"), _gear_item(household, "Stove")
+    source, rows = _completed_source_trip(actor=owner, household=household, entries=[(tent, 1), (stove, 2)])
+    token = trip_services.get_seed_source_snapshot_token(
+        actor=owner, target_trip_id=target.pk, source_kind="completed_trip", source_id=source.pk
+    )
+    rows[tent.pk].packed = False
+    rows[tent.pk].save(update_fields=["packed"])
+    with pytest.raises(ValidationError, match="source changed"):
+        trip_services.seed_trip_gear(
+            actor=owner, target_trip_id=target.pk, source_kind="completed_trip", source_id=source.pk,
+            selections=[(tent.pk, 1)], source_snapshot=token,
+        )
+
+    refreshed_token = trip_services.get_seed_source_snapshot_token(
+        actor=owner, target_trip_id=target.pk, source_kind="completed_trip", source_id=source.pk
+    )
+    TripGear.objects.filter(trip=source, gear_item=stove).delete()
+    with pytest.raises(ValidationError, match="source changed"):
+        trip_services.seed_trip_gear(
+            actor=owner, target_trip_id=target.pk, source_kind="completed_trip", source_id=source.pk,
+            selections=[(tent.pk, 1), (stove.pk, 1)], source_snapshot=refreshed_token,
         )
     assert not TripGear.objects.filter(trip=target).exists()
 
@@ -1189,11 +1261,12 @@ def test_seed_trip_ui_lists_sources_and_posts_gear_uuids_with_feedback(client, o
     assert chosen.status_code == 200
     assert chosen.context["form"][f"include_{tent.pk}"].value() is True
     assert chosen.context["form"][f"quantity_{tent.pk}"].value() == 2
+    snapshot = chosen.context["form"]["source_snapshot"].value()
     page = client.get(reverse("trips:trip_gear_seed", args=[target.pk]), {"source_kind": "kit", "source_id": str(kit.pk)})
     assert f'name="include_{tent.pk}"'.encode() in page.content
 
     response = client.post(reverse("trips:trip_gear_seed", args=[target.pk]), {
-        "source_kind": "kit", "source_id": str(kit.pk),
+        "source_kind": "kit", "source_id": str(kit.pk), "source_snapshot": snapshot,
         f"include_{tent.pk}": "on", f"quantity_{tent.pk}": "2",
         f"quantity_{stove.pk}": "0",
     })
@@ -1204,7 +1277,7 @@ def test_seed_trip_ui_lists_sources_and_posts_gear_uuids_with_feedback(client, o
     assert not TripGear.objects.filter(trip=target, gear_item=stove).exists()
 
     response = client.post(reverse("trips:trip_gear_seed", args=[target.pk]), {
-        "source_kind": "kit", "source_id": str(kit.pk),
+        "source_kind": "kit", "source_id": str(kit.pk), "source_snapshot": snapshot,
         f"include_{tent.pk}": "on", f"quantity_{tent.pk}": "2",
         f"include_{stove.pk}": "on", f"quantity_{stove.pk}": "3",
     }, follow=True)
@@ -1224,8 +1297,10 @@ def test_seed_trip_ui_completed_trip_source_and_empty_state(client, owner, house
     client.force_login(owner)
     body = client.get(reverse("trips:trip_gear_seed", args=[target.pk])).content
     assert str(source.pk).encode() in body
+    seed_page = client.get(reverse("trips:trip_gear_seed", args=[target.pk]), {"source_kind": "completed_trip", "source_id": str(source.pk)})
+    snapshot = seed_page.context["form"]["source_snapshot"].value()
     response = client.post(reverse("trips:trip_gear_seed", args=[target.pk]), {
-        "source_kind": "completed_trip", "source_id": str(source.pk),
+        "source_kind": "completed_trip", "source_id": str(source.pk), "source_snapshot": snapshot,
         f"include_{gear.pk}": "on", f"quantity_{gear.pk}": "4",
     })
     assert response.status_code == 302
@@ -1246,6 +1321,55 @@ def test_seed_trip_ui_completed_trip_source_and_empty_state(client, owner, house
     assert chosen_empty.status_code == 200
     assert b"This source has no gear rows to select." in chosen_empty.content
     assert b"Add selected gear" not in chosen_empty.content
+
+
+def test_seed_trip_ui_stale_snapshot_keeps_token_and_offers_explicit_refresh(client, owner, household):
+    target = create_trip(actor=owner, household=household, data={"name": "Target"})
+    tent = _gear_item(household, "Tent")
+    kit, _ = _kit_with_rows(actor=owner, household=household, entries=[(tent, 2)])
+    client.force_login(owner)
+    page = client.get(reverse("trips:trip_gear_seed", args=[target.pk]), {
+        "source_kind": "kit", "source_id": str(kit.pk),
+    })
+    token = page.context["form"]["source_snapshot"].value()
+    GearKitItem.objects.filter(kit=kit, gear_item=tent).update(quantity=3)
+
+    response = client.post(reverse("trips:trip_gear_seed", args=[target.pk]), {
+        "source_kind": "kit", "source_id": str(kit.pk), "source_snapshot": token,
+        f"include_{tent.pk}": "on", f"quantity_{tent.pk}": "2",
+    })
+    assert response.status_code == 200
+    assert response.context["source_changed"] is True
+    assert response.context["form"]["source_snapshot"].value() == token
+    assert response.context["form"][f"quantity_{tent.pk}"].value() == "2"
+    assert response.context["form"][f"include_{tent.pk}"].value() is True
+    assert b"refresh and try again" in response.content
+    assert not TripGear.objects.filter(trip=target).exists()
+
+
+def test_seed_trip_ui_does_not_disclose_foreign_or_unknown_source_ids(
+    client, owner, other_owner, household, other_household
+):
+    import re
+
+    Membership.objects.create(user=owner, household=other_household, role=MembershipRole.MEMBER)
+    target = create_trip(actor=owner, household=household, data={"name": "Target"})
+    foreign_gear = _gear_item(other_household, "Foreign tent")
+    foreign_kit, _ = _kit_with_rows(actor=other_owner, household=other_household, entries=[(foreign_gear, 1)])
+    client.force_login(owner)
+    session = client.session
+    session["active_household_id"] = str(household.pk)
+    session.save()
+    response_pairs = []
+    for source_id in (str(foreign_kit.pk), str(uuid.uuid4())):
+        response = client.post(reverse("trips:trip_gear_seed", args=[target.pk]), {
+            "source_kind": "kit", "source_id": source_id,
+        })
+        assert response.status_code == 200
+        response_pairs.append(response.content)
+    normalized = [re.sub(rb'name="csrfmiddlewaretoken" value="[^"]+"', b'csrf', body) for body in response_pairs]
+    assert normalized[0] == normalized[1]
+    assert not TripGear.objects.filter(trip=target).exists()
 
 
 def test_trip_ui_remove_confirmation_read_only_controls_and_direct_post_feedback(client, owner, household):

@@ -50,12 +50,14 @@ class GearKitForm(forms.Form):
 class SeedTripGearForm(forms.Form):
     source_kind = forms.ChoiceField(label="Source type")
     source_id = forms.ChoiceField(label="Source")
+    source_snapshot = forms.CharField(widget=forms.HiddenInput, required=False)
 
     def __init__(self, *args, sources, source_rows=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.sources = list(sources)
         self.fields["source_kind"].choices = [("kit", "Saved gear kit"), ("completed_trip", "Completed trip")]
         self.fields["source_id"].choices = [(str(pk), label) for _kind, pk, label in self.sources]
+        self.fields["source_id"].error_messages["invalid_choice"] = "Choose a source from this household."
         self.gear_by_id = {}
         for row in source_rows or []:
             gear = row.gear_item

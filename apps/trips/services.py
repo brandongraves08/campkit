@@ -1,6 +1,7 @@
 import uuid
 from dataclasses import dataclass
 
+from django.core import signing
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
@@ -9,7 +10,6 @@ from django.utils import timezone
 from apps.households.permissions import require_household_member
 from apps.inventory.services import get_gear_item, packed_gear_weight_totals
 from apps.trips.models import GearKit, GearKitItem, Trip, TripGear
-
 
 SOURCE_KIND_KIT = "kit"
 SOURCE_KIND_COMPLETED_TRIP = "completed_trip"
@@ -245,14 +245,22 @@ def _seed_source_rows(*, actor, target, source_kind, source_id):
     if kind not in _SOURCE_KINDS:
         raise ValidationError("Choose a saved kit or a completed trip as the source.")
     if kind == SOURCE_KIND_KIT:
-        kit = _kit_for_actor(kit_id=source_id, actor=actor, lock=True)
-        if kit.household_id != target.household_id:
-            raise ValidationError("The source must belong to the target trip's household.")
+        kits = GearKit.objects.filter(household_id=target.household_id, household__memberships__user=actor)
+        try:
+            kit = kits.select_for_update().filter(pk=source_id).first()
+        except (TypeError, ValueError, ValidationError):
+            kit = None
+        if kit is None:
+            raise GearKit.DoesNotExist("Gear kit not found.")
         rows = GearKitItem.objects.select_for_update().filter(kit=kit)
     else:
-        source = _trip_for_member_actor(trip_id=source_id, actor=actor, lock=True)
-        if source.household_id != target.household_id:
-            raise ValidationError("The source must belong to the target trip's household.")
+        sources = Trip.objects.filter(household_id=target.household_id, household__memberships__user=actor)
+        try:
+            source = sources.select_for_update().filter(pk=source_id).first()
+        except (TypeError, ValueError, ValidationError):
+            source = None
+        if source is None:
+            raise Trip.DoesNotExist("Trip not found.")
         if source.status != Trip.Status.COMPLETED:
             raise ValidationError("Only a completed trip can be used as a source.")
         rows = TripGear.objects.select_for_update().filter(trip=source)
@@ -264,6 +272,45 @@ def _seed_source_rows(*, actor, target, source_kind, source_id):
         rows_by_id[row.pk] = row
         rows_by_id[row.gear_item_id] = row
     return rows_by_id
+
+
+_SEED_SNAPSHOT_SALT = "trips.seed-source-snapshot.v1"
+
+
+def _model_snapshot(instance):
+    return [[field.attname, str(getattr(instance, field.attname))] for field in instance._meta.concrete_fields]
+
+
+def _seed_source_snapshot(*, actor, target, source_kind, source_id):
+    kind = str(source_kind or "").strip()
+    if kind not in _SOURCE_KINDS:
+        raise ValidationError("Choose a saved kit or a completed trip as the source.")
+    if kind == SOURCE_KIND_KIT:
+        source = GearKit.objects.filter(
+            household_id=target.household_id, household__memberships__user=actor, pk=source_id
+        ).select_for_update().first()
+        if source is None:
+            raise GearKit.DoesNotExist("Gear kit not found.")
+        rows = list(GearKitItem.objects.select_for_update().filter(kit=source).select_related("gear_item").order_by("pk"))
+    else:
+        source = Trip.objects.filter(
+            household_id=target.household_id, household__memberships__user=actor, pk=source_id
+        ).select_for_update().first()
+        if source is None:
+            raise Trip.DoesNotExist("Trip not found.")
+        if source.status != Trip.Status.COMPLETED:
+            raise ValidationError("Only a completed trip can be used as a source.")
+        rows = list(TripGear.objects.select_for_update().filter(trip=source).select_related("gear_item").order_by("pk"))
+    return [str(actor.pk), str(target.pk), kind, str(source.pk), _model_snapshot(source),
+            [[_model_snapshot(row), _model_snapshot(row.gear_item)] for row in rows]]
+
+
+@transaction.atomic
+def get_seed_source_snapshot_token(*, actor, target_trip_id, source_kind, source_id):
+    """Sign the complete source state shown by the seed form."""
+    target = _trip_for_member_actor(trip_id=target_trip_id, actor=actor, lock=True)
+    snapshot = _seed_source_snapshot(actor=actor, target=target, source_kind=source_kind, source_id=source_id)
+    return signing.dumps(snapshot, salt=_SEED_SNAPSHOT_SALT, compress=True)
 
 
 def _selection_key(row_id):
@@ -311,7 +358,7 @@ def _validated_seed_rows(selections, source_rows):
 
 
 @transaction.atomic
-def seed_trip_gear(*, actor, target_trip_id, source_kind, source_id, selections):
+def seed_trip_gear(*, actor, target_trip_id, source_kind, source_id, selections, source_snapshot=None):
     """Copy selected kit or completed-trip gear rows onto a mutable trip.
 
     All target/source/gear rows are resolved and every quantity validated
@@ -320,6 +367,22 @@ def seed_trip_gear(*, actor, target_trip_id, source_kind, source_id, selections)
     """
     target = _trip_for_member_actor(trip_id=target_trip_id, actor=actor, lock=True)
     _require_packing_mutable(target)
+    if source_snapshot is not None:
+        try:
+            displayed = signing.loads(source_snapshot, salt=_SEED_SNAPSHOT_SALT)
+        except (signing.BadSignature, TypeError, ValueError):
+            displayed = None
+        identity = [str(actor.pk), str(target.pk), str(source_kind or "").strip(), str(source_id)]
+        if not isinstance(displayed, list) or displayed[:4] != identity:
+            raise ValidationError("The source changed; refresh and try again.")
+        try:
+            current = _seed_source_snapshot(
+                actor=actor, target=target, source_kind=source_kind, source_id=source_id
+            )
+        except (GearKit.DoesNotExist, Trip.DoesNotExist, ValidationError):
+            raise ValidationError("The source changed; refresh and try again.")
+        if displayed != current:
+            raise ValidationError("The source changed; refresh and try again.")
     source_rows = _seed_source_rows(
         actor=actor, target=target, source_kind=source_kind, source_id=source_id
     )
