@@ -51,8 +51,15 @@
     </header>
     {% if messages %}
       <div class="shell">
-        <ul class="flash-list" role="status">
-          {% for message in messages %}<li>{{ message }}</li>{% endfor %}
+        <ul class="flash-list{% for message in messages %}{% if 'error' in message.tags %} flash-list-error{% endif %}{% endfor %}">
+          {% for message in messages %}
+            <li role="{% if 'error' in message.tags %}alert{% else %}status{% endif %}">
+              {{ message }}
+              {% if 'protected-gear' in message.tags %}
+                Remove it from <a href="{% url 'trips:trip_list' %}">Trips</a> or <a href="{% url 'trips:gear_kit_list' %}">Saved gear kits</a>, then retry.
+              {% endif %}
+            </li>
+          {% endfor %}
         </ul>
       </div>
     {% endif %}

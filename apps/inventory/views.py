@@ -62,7 +62,11 @@ def gear_delete(request, item_id):
     try:
         delete_gear_item(actor=request.user, household=household, item_id=item.pk)
     except ProtectedError:
-        messages.error(request, "This gear is still used by a trip or saved kit. Remove it from trips or kits first, then try again.")
+        messages.error(
+            request,
+            f"{item.name} cannot be deleted while it is referenced by a trip or saved kit.",
+            extra_tags="protected-gear",
+        )
     else:
         messages.success(request, "Shared gear deleted.")
     return redirect("inventory:gear_list")

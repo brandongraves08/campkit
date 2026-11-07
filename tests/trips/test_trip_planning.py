@@ -116,6 +116,8 @@ def test_save_trip_as_kit_success_and_empty_trip_validation(client, owner, house
     response = client.post(reverse("trips:gear_kit_create_from_trip", args=[empty_trip.pk]), {"name": "Empty kit"})
     assert response.status_code == 200
     assert b"at least one gear item" in response.content
+    assert b"Add gear to this trip first" in response.content
+    assert reverse("trips:trip_detail", args=[empty_trip.pk]).encode() in response.content
     assert not GearKit.objects.filter(name="Empty kit").exists()
 
 
@@ -153,6 +155,23 @@ def test_unselected_kit_row_does_not_require_a_quantity(client, owner, household
     })
     assert response.status_code == 302
     assert list(kit.items.values_list("gear_item_id", "quantity")) == [(tent.pk, 1)]
+
+
+def test_edit_rejects_quantity_change_for_unchecked_gear(client, owner, household):
+    trip, tent, stove = _trip_with_gear(actor=owner, household=household)
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Quantity selection")
+    client.force_login(owner)
+
+    response = client.post(reverse("trips:gear_kit_edit", args=[kit.pk]), {
+        "name": "Quantity selection",
+        f"include_{tent.pk}": "on", f"quantity_{tent.pk}": "2",
+        f"quantity_{stove.pk}": "4",
+    })
+
+    assert response.status_code == 200
+    assert b"Select this gear to save its quantity" in response.content
+    kit.refresh_from_db()
+    assert list(kit.items.values_list("gear_item_id", "quantity")) == [(tent.pk, 2), (stove.pk, 1)]
 
 
 def test_kit_duplicate_name_and_foreign_id_do_not_disclose_or_mutate(client, owner, other_owner, household, other_household):
@@ -209,7 +228,9 @@ def test_gear_delete_protection_is_friendly_and_rolls_back_audit(client, owner, 
     response = client.post(reverse("inventory:gear_delete", args=[gear.pk]))
     assert response.status_code == 302
     page = client.get(response["Location"])
-    assert b"remove it from trips or kits first" in page.content.lower(), page.content.decode()
+    assert b"cannot be deleted while it is referenced by a trip or saved kit" in page.content.lower(), page.content.decode()
+    assert reverse("trips:trip_list").encode() in page.content
+    assert reverse("trips:gear_kit_list").encode() in page.content
     assert GearItem.objects.filter(pk=gear.pk).exists()
     assert TripGear.objects.filter(trip=trip, gear_item=gear).exists()
     assert InventoryChange.objects.filter(object_id=str(gear.pk)).count() == before_audit

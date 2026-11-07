@@ -83,6 +83,10 @@ def test_protected_gear_delete_feedback_preserves_rows_and_rolls_back_audit(
     assert response.status_code == 302
     page = client.get(response["Location"])
     assert b"trip or saved kit" in page.content
+    assert f"{gear.name} cannot be deleted".encode() in page.content
+    assert reverse("trips:trip_list").encode() in page.content
+    assert reverse("trips:gear_kit_list").encode() in page.content
+    assert b'role="alert"' in page.content
     assert GearItem.objects.filter(pk=gear.pk).exists()
     assert list(InventoryChange.objects.filter(object_id=str(gear.pk)).values_list("action", "before", "after")) == audit_before
     assert TripGear.objects.filter(trip=trip, gear_item=gear).exists() == (references in {"trip", "both"})

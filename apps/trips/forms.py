@@ -30,8 +30,13 @@ class GearKitForm(forms.Form):
         for gear_id in self.gear_by_id:
             include_key = f"include_{gear_id}"
             quantity_key = f"quantity_{gear_id}"
-            if cleaned.get(include_key) and cleaned.get(quantity_key) is None:
-                self.add_error(quantity_key, "Enter a whole-number quantity of at least one.")
+            if cleaned.get(include_key):
+                if cleaned.get(quantity_key) is None:
+                    self.add_error(quantity_key, "Enter a whole-number quantity of at least one.")
+            elif cleaned.get(quantity_key) is not None and cleaned.get(quantity_key) != self.get_initial_for_field(
+                self.fields[quantity_key], quantity_key
+            ):
+                self.add_error(quantity_key, "Select this gear to save its quantity.")
         return cleaned
 
     def selected_items(self):

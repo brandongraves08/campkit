@@ -82,6 +82,7 @@ def gear_kit_list(request):
 def gear_kit_create_from_trip(request, trip_id):
     household = current_household(request)
     trip = get_object_or_404(Trip.objects.for_household(household), pk=trip_id)
+    trip_has_gear = bool(trip_packing_list(trip_id=trip.pk, actor=request.user))
     form = SaveGearKitForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         try:
@@ -93,6 +94,7 @@ def gear_kit_create_from_trip(request, trip_id):
             return redirect("trips:gear_kit_list")
     return render(request, "trips/gear_kit_form.html", {
         "nav": "trips", "form": form, "title": "Save packing list as a kit", "trip": trip,
+        "trip_has_gear": trip_has_gear,
     })
 
 

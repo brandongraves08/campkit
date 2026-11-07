@@ -5,7 +5,16 @@
 {% block content %}
   <div class="page-head">
     <h1>{{ title }}</h1>
-    {% if trip %}<p class="lede">Save the current packing list from {{ trip.name }} as a household kit.</p>{% endif %}
+    {% if trip %}
+      <p class="lede">
+        {% if trip_has_gear %}
+          Save the current packing list from {{ trip.name }} as a household kit.
+        {% else %}
+          This trip has no gear yet. Add gear to this trip first, then return here.
+          <a href="{% url 'trips:trip_detail' trip.pk %}">Return to {{ trip.name }}</a>.
+        {% endif %}
+      </p>
+    {% endif %}
     {% if kit %}<p class="lede">Choose the shared gear and quantities this kit should contain. Removing a row here never deletes shared gear or trip entries.</p>{% endif %}
   </div>
   <div class="card">
