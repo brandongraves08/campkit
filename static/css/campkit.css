@@ -384,6 +384,24 @@ button {
   gap: 0.75rem;
 }
 
+.seed-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(9rem, 12rem);
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.seed-row input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-right: 0.35rem;
+  vertical-align: middle;
+}
+
+.seed-row input[type="number"] {
+  width: 100%;
+}
+
 .kit-edit-row > label:first-child {
   display: flex;
   align-items: center;
@@ -747,7 +765,8 @@ summary {
     align-items: stretch;
   }
 
-  .kit-edit-row {
+  .kit-edit-row,
+  .seed-row {
     grid-template-columns: minmax(0, 1fr);
   }
 

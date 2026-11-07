@@ -1166,3 +1166,127 @@ def test_packing_mutations_do_not_disclose_foreign_trip_ids(
     assert TripGear.objects.filter(trip=foreign_trip).count() == 1
     foreign_entry.refresh_from_db()
     assert foreign_entry.packed is False
+
+
+def test_seed_trip_ui_lists_sources_and_posts_gear_uuids_with_feedback(client, owner, household):
+    from apps.trips.services import create_gear_kit_from_trip
+
+    source, tent, stove = _trip_with_gear(actor=owner, household=household, trip_name="Source plan")
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=source.pk, name="Weekend kit")
+    completed, rows = _completed_source_trip(actor=owner, household=household, entries=[(tent, 2), (stove, 1)])
+    target = create_trip(actor=owner, household=household, data={"name": "Target plan"})
+    existing = add_trip_gear(trip_id=target.pk, gear_item_id=tent.pk, quantity=7, actor=owner)
+    set_trip_gear_packed(trip_id=target.pk, entry_id=existing.pk, packed=True, actor=owner)
+    client.force_login(owner)
+
+    page = client.get(reverse("trips:trip_gear_seed", args=[target.pk]))
+    assert page.status_code == 200
+    assert b"Weekend kit" in page.content and b"Last autumn" in page.content
+    assert b"Completed trip" in page.content
+    chosen = client.post(reverse("trips:trip_gear_seed", args=[target.pk]), {
+        "source_kind": "kit", "source_id": str(kit.pk), "choose_source": "1",
+    })
+    assert chosen.status_code == 200
+    assert chosen.context["form"][f"include_{tent.pk}"].value() is True
+    assert chosen.context["form"][f"quantity_{tent.pk}"].value() == 2
+    page = client.get(reverse("trips:trip_gear_seed", args=[target.pk]), {"source_kind": "kit", "source_id": str(kit.pk)})
+    assert f'name="include_{tent.pk}"'.encode() in page.content
+
+    response = client.post(reverse("trips:trip_gear_seed", args=[target.pk]), {
+        "source_kind": "kit", "source_id": str(kit.pk),
+        f"include_{tent.pk}": "on", f"quantity_{tent.pk}": "2",
+        f"quantity_{stove.pk}": "0",
+    })
+    assert response.status_code == 200
+    assert b"0" in response.content
+    assert response.context["form"].errors
+    assert response.context["form"][f"quantity_{stove.pk}"].errors
+    assert not TripGear.objects.filter(trip=target, gear_item=stove).exists()
+
+    response = client.post(reverse("trips:trip_gear_seed", args=[target.pk]), {
+        "source_kind": "kit", "source_id": str(kit.pk),
+        f"include_{tent.pk}": "on", f"quantity_{tent.pk}": "2",
+        f"include_{stove.pk}": "on", f"quantity_{stove.pk}": "3",
+    }, follow=True)
+    assert response.status_code == 200
+    assert b"1 item added" in response.content and b"1 already on this trip" in response.content
+    assert _target_rows(target) == {tent.pk: (7, True), stove.pk: (3, False)}
+    assert rows[tent.pk].quantity == 2
+    assert completed.status == Trip.Status.COMPLETED
+
+
+def test_seed_trip_ui_completed_trip_source_and_empty_state(client, owner, household):
+    from apps.trips.services import create_gear_kit_from_trip
+
+    target = create_trip(actor=owner, household=household, data={"name": "Target"})
+    gear = _gear_item(household, "Stove")
+    source, _ = _completed_source_trip(actor=owner, household=household, entries=[(gear, 2)])
+    client.force_login(owner)
+    body = client.get(reverse("trips:trip_gear_seed", args=[target.pk])).content
+    assert str(source.pk).encode() in body
+    response = client.post(reverse("trips:trip_gear_seed", args=[target.pk]), {
+        "source_kind": "completed_trip", "source_id": str(source.pk),
+        f"include_{gear.pk}": "on", f"quantity_{gear.pk}": "4",
+    })
+    assert response.status_code == 302
+    assert _target_rows(target) == {gear.pk: (4, False)}
+
+    empty_target = create_trip(actor=owner, household=household, data={"name": "Empty target"})
+    GearKit.objects.all().delete()
+    Trip.objects.filter(status=Trip.Status.COMPLETED).update(status=Trip.Status.CANCELLED)
+    empty = client.get(reverse("trips:trip_gear_seed", args=[empty_target.pk]))
+    assert empty.status_code == 200
+    assert b"No saved kits or completed trips" in empty.content
+    assert b"Save a trip with gear" in empty.content
+
+
+def test_trip_ui_remove_confirmation_read_only_controls_and_direct_post_feedback(client, owner, household):
+    target = create_trip(actor=owner, household=household, data={"name": "Editable"})
+    gear = _gear_item(household, "Tent")
+    entry = add_trip_gear(trip_id=target.pk, gear_item_id=gear.pk, quantity=1, actor=owner)
+    client.force_login(owner)
+    body = client.get(reverse("trips:trip_detail", args=[target.pk])).content
+    assert b"Remove from this trip" in body
+    assert b"data-confirm=" in body
+    assert b"Mark packed" in body
+
+    for status in (Trip.Status.COMPLETED, Trip.Status.CANCELLED):
+        _set_trip_status(target, status)
+        response = client.get(reverse("trips:trip_detail", args=[target.pk]))
+        assert response.status_code == 200
+        for control in (b"Remove from this trip", b"Mark packed", b"Mark unpacked", b"Add to packing list", b"Start from a kit or past trip"):
+            assert control not in response.content
+        assert b"Tent" in response.content and b"not packed" in response.content
+        packed = client.post(reverse("trips:trip_gear_packed", args=[target.pk, entry.pk]), {"packed": "true"}, follow=True)
+        assert packed.status_code == 200 and b"read-only packing list" in packed.content
+        added = client.post(reverse("trips:trip_gear_add", args=[target.pk]), {"gear_item_id": str(uuid.uuid4()), "quantity": "1"}, follow=True)
+        assert added.status_code == 200 and b"read-only packing list" in added.content
+        removed_read_only = client.post(reverse("trips:trip_gear_remove", args=[target.pk, entry.pk]), follow=True)
+        assert removed_read_only.status_code == 200 and b"read-only packing list" in removed_read_only.content
+        if status == Trip.Status.COMPLETED:
+            seed_read_only = client.post(reverse("trips:trip_gear_seed", args=[target.pk]), follow=True)
+            assert seed_read_only.status_code == 200 and b"read-only packing list" in seed_read_only.content
+
+    _set_trip_status(target, Trip.Status.PLANNED)
+    removed = client.post(reverse("trips:trip_gear_remove", args=[target.pk, entry.pk]), follow=True)
+    assert removed.status_code == 200
+    assert b"Removed Tent from this trip" in removed.content
+    assert GearItem.objects.filter(pk=gear.pk).exists()
+
+
+def test_seed_source_controls_have_labels_focusable_order_and_mobile_overflow(client, owner, household):
+    from html.parser import HTMLParser
+    from pathlib import Path
+
+    target = create_trip(actor=owner, household=household, data={"name": "Target"})
+    source, tent, _ = _trip_with_gear(actor=owner, household=household, trip_name="Source")
+    create_gear_kit_from_trip(actor=owner, trip_id=source.pk, name="Camp kit")
+    client.force_login(owner)
+    body = client.get(reverse("trips:trip_gear_seed", args=[target.pk]), {"source_kind": "kit", "source_id": str(GearKit.objects.get(name="Camp kit").pk)}).content.decode()
+    assert 'for="id_source_kind"' in body and 'for="id_source_id"' in body
+    assert f'for="include-{tent.pk}"' in body and f'for="quantity-{tent.pk}"' in body
+    assert 'name="source_kind"' in body and 'name="source_id"' in body
+    css = (Path(__file__).resolve().parents[2] / "static/css/campkit.css").read_text()
+    assert "@media (max-width: 640px)" in css and "overflow-wrap: anywhere" in css
+    positions = [body.index('id="id_source_kind"'), body.index('id="id_source_id"'), body.index(f'id="include-{tent.pk}"'), body.index(f'id="quantity-{tent.pk}"'), body.index("Add selected gear")]
+    assert positions == sorted(positions)

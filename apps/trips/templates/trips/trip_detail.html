@@ -18,7 +18,10 @@
     {% if trip.conditions %}<p class="meta">Conditions: {{ trip.conditions }}</p>{% endif %}
   </div>
   <div class="button-row">
-    {% if gear %}<a class="button button-primary" href="{% url 'trips:gear_kit_create_from_trip' trip.pk %}">Save packing list as kit</a>{% endif %}
+    {% if packing_mutable %}
+      <a class="button button-primary" href="{% url 'trips:trip_gear_seed' trip.pk %}">Start from a kit or past trip</a>
+      {% if gear %}<a class="button" href="{% url 'trips:gear_kit_create_from_trip' trip.pk %}">Save packing list as kit</a>{% endif %}
+    {% endif %}
     <a class="button" href="{% url 'trips:gear_kit_list' %}">Saved gear kits</a>
   </div>
 
@@ -43,11 +46,17 @@
               {{ gear_item.total_weight_grams }} g each ·
               {% if entry.packed %}packed{% else %}not packed{% endif %}
             </p>
-            <form class="inline-form" method="post" action="{% url 'trips:trip_gear_packed' trip.pk entry.pk %}">
-              {% csrf_token %}
-              <input type="hidden" name="packed" value="{% if entry.packed %}false{% else %}true{% endif %}">
-              <button class="button" type="submit">{% if entry.packed %}Mark unpacked{% else %}Mark packed{% endif %}</button>
-            </form>
+            {% if packing_mutable %}
+              <form class="inline-form" method="post" action="{% url 'trips:trip_gear_packed' trip.pk entry.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="packed" value="{% if entry.packed %}false{% else %}true{% endif %}">
+                <button class="button" type="submit">{% if entry.packed %}Mark unpacked{% else %}Mark packed{% endif %}</button>
+              </form>
+              <form class="inline-form" method="post" action="{% url 'trips:trip_gear_remove' trip.pk entry.pk %}" data-confirm="Remove {{ gear_item.name }} from this trip? Shared gear will not be deleted.">
+                {% csrf_token %}
+                <button class="button button-danger" type="submit">Remove from this trip</button>
+              </form>
+            {% endif %}
           </li>
         {% endfor %}
       </ul>
@@ -55,22 +64,24 @@
       <p class="empty-state">No gear on the packing list.</p>
     {% endif %}
 
-    <form class="card" method="post" action="{% url 'trips:trip_gear_add' trip.pk %}">
-      {% csrf_token %}
-      <div class="field">
-        <label for="trip-gear-item">Add shared gear</label>
-        <select id="trip-gear-item" name="gear_item_id" required>
-          {% for item in available_gear %}<option value="{{ item.pk }}">{{ item.name }} ({{ item.get_verification_status_display }})</option>{% endfor %}
-        </select>
-      </div>
-      <div class="field">
-        <label for="trip-gear-quantity">Quantity</label>
-        <input id="trip-gear-quantity" type="number" name="quantity" min="1" value="1">
-      </div>
-      <div class="button-row">
-        <button class="button button-primary" type="submit">Add to packing list</button>
-      </div>
-    </form>
+    {% if packing_mutable %}
+      <form class="card" method="post" action="{% url 'trips:trip_gear_add' trip.pk %}">
+        {% csrf_token %}
+        <div class="field">
+          <label for="trip-gear-item">Add shared gear</label>
+          <select id="trip-gear-item" name="gear_item_id" required>
+            {% for item in available_gear %}<option value="{{ item.pk }}">{{ item.name }} ({{ item.get_verification_status_display }})</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="trip-gear-quantity">Quantity</label>
+          <input id="trip-gear-quantity" type="number" name="quantity" min="1" value="1">
+        </div>
+        <div class="button-row">
+          <button class="button button-primary" type="submit">Add to packing list</button>
+        </div>
+      </form>
+    {% endif %}
   </section>
 
   <section aria-labelledby="meals-heading">
