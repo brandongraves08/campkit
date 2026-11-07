@@ -45,7 +45,7 @@
           {% endif %}
         </fieldset>
         {% for field in form %}{% if field.errors %}<div role="alert" class="form-errors">{{ field.errors }}</div>{% endif %}{% endfor %}
-        <div class="button-row"><button class="button button-primary" type="submit">Add selected gear</button></div>
+        {% if source_rows %}<div class="button-row"><button class="button button-primary" type="submit">Add selected gear</button></div>{% endif %}
       {% else %}
         <div class="button-row"><button class="button" type="submit" name="choose_source" value="1">Choose source</button></div>
       {% endif %}

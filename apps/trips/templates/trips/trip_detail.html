@@ -52,7 +52,7 @@
                 <input type="hidden" name="packed" value="{% if entry.packed %}false{% else %}true{% endif %}">
                 <button class="button" type="submit">{% if entry.packed %}Mark unpacked{% else %}Mark packed{% endif %}</button>
               </form>
-              <form class="inline-form" method="post" action="{% url 'trips:trip_gear_remove' trip.pk entry.pk %}" data-confirm="Remove {{ gear_item.name }} from this trip? Shared gear will not be deleted.">
+              <form class="inline-form" method="post" action="{% url 'trips:trip_gear_remove' trip.pk entry.pk %}">
                 {% csrf_token %}
                 <button class="button button-danger" type="submit">Remove from this trip</button>
               </form>

@@ -135,7 +135,12 @@ def trip_gear_seed(request, trip_id):
 def trip_gear_remove(request, trip_id, entry_id):
     household = current_household(request)
     trip = get_object_or_404(Trip.objects.for_household(household), pk=trip_id)
-    entry = get_object_or_404(TripGear.objects.filter(trip=trip), pk=entry_id)
+    entry = get_object_or_404(TripGear.objects.select_related("gear_item").filter(trip=trip), pk=entry_id)
+    if trip.status in (Trip.Status.COMPLETED, Trip.Status.CANCELLED):
+        messages.error(request, "This trip has a read-only packing list.")
+        return redirect("trips:trip_detail", trip_id=trip.pk)
+    if request.POST.get("confirm") != "1":
+        return render(request, "trips/trip_gear_remove_confirm.html", {"trip": trip, "entry": entry})
     try:
         remove_trip_gear(actor=request.user, trip_id=trip.pk, entry_id=entry.pk)
     except ValidationError as exc:

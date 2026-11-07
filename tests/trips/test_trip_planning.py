@@ -1239,6 +1239,14 @@ def test_seed_trip_ui_completed_trip_source_and_empty_state(client, owner, house
     assert b"No saved kits or completed trips" in empty.content
     assert b"Save a trip with gear" in empty.content
 
+    empty_source, _ = _completed_source_trip(actor=owner, household=household, entries=[])
+    chosen_empty = client.post(reverse("trips:trip_gear_seed", args=[empty_target.pk]), {
+        "source_kind": "completed_trip", "source_id": str(empty_source.pk), "choose_source": "1",
+    })
+    assert chosen_empty.status_code == 200
+    assert b"This source has no gear rows to select." in chosen_empty.content
+    assert b"Add selected gear" not in chosen_empty.content
+
 
 def test_trip_ui_remove_confirmation_read_only_controls_and_direct_post_feedback(client, owner, household):
     target = create_trip(actor=owner, household=household, data={"name": "Editable"})
@@ -1247,7 +1255,6 @@ def test_trip_ui_remove_confirmation_read_only_controls_and_direct_post_feedback
     client.force_login(owner)
     body = client.get(reverse("trips:trip_detail", args=[target.pk])).content
     assert b"Remove from this trip" in body
-    assert b"data-confirm=" in body
     assert b"Mark packed" in body
 
     for status in (Trip.Status.COMPLETED, Trip.Status.CANCELLED):
@@ -1268,9 +1275,15 @@ def test_trip_ui_remove_confirmation_read_only_controls_and_direct_post_feedback
             assert seed_read_only.status_code == 200 and b"read-only packing list" in seed_read_only.content
 
     _set_trip_status(target, Trip.Status.PLANNED)
-    removed = client.post(reverse("trips:trip_gear_remove", args=[target.pk, entry.pk]), follow=True)
+    remove_url = reverse("trips:trip_gear_remove", args=[target.pk, entry.pk])
+    confirmation = client.post(remove_url)
+    assert confirmation.status_code == 200
+    assert b"Confirm removal" in confirmation.content
+    assert TripGear.objects.filter(pk=entry.pk).exists()
+    removed = client.post(remove_url, {"confirm": "1"}, follow=True)
     assert removed.status_code == 200
     assert b"Removed Tent from this trip" in removed.content
+    assert not TripGear.objects.filter(pk=entry.pk).exists()
     assert GearItem.objects.filter(pk=gear.pk).exists()
 
 
