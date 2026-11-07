@@ -1347,6 +1347,66 @@ def test_seed_trip_ui_stale_snapshot_keeps_token_and_offers_explicit_refresh(cli
     assert not TripGear.objects.filter(trip=target).exists()
 
 
+def test_seed_trip_ui_rejects_source_mutation_after_display_snapshot_before_submission(
+    client, owner, household, monkeypatch
+):
+    from apps.trips import views as trip_views
+
+    target = create_trip(actor=owner, household=household, data={"name": "Target"})
+    tent = _gear_item(household, "Tent")
+    kit, _ = _kit_with_rows(actor=owner, household=household, entries=[(tent, 2)])
+    client.force_login(owner)
+    snapshot_display = trip_views.get_seed_source_display_snapshot
+
+    def mutate_after_display_snapshot(**kwargs):
+        displayed = snapshot_display(**kwargs)
+        GearKitItem.objects.filter(kit=kit, gear_item=tent).update(quantity=3)
+        return displayed
+
+    monkeypatch.setattr(trip_views, "get_seed_source_display_snapshot", mutate_after_display_snapshot)
+    response = client.get(reverse("trips:trip_gear_seed", args=[target.pk]), {
+        "source_kind": "kit", "source_id": str(kit.pk),
+    })
+    assert response.status_code == 200
+    assert response.context["form"][f"quantity_{tent.pk}"].value() == 2
+    token = response.context["form"]["source_snapshot"].value()
+
+    response = client.post(reverse("trips:trip_gear_seed", args=[target.pk]), {
+        "source_kind": "kit", "source_id": str(kit.pk), "source_snapshot": token,
+        f"include_{tent.pk}": "on", f"quantity_{tent.pk}": "2",
+    })
+
+    assert response.status_code == 200
+    assert response.context["source_changed"] is True
+    assert b"refresh and try again" in response.content
+    assert not TripGear.objects.filter(trip=target).exists()
+    assert GearKitItem.objects.get(kit=kit, gear_item=tent).quantity == 3
+
+
+def test_seed_trip_ui_handles_source_disappearing_before_snapshot_acquisition(
+    client, owner, household, monkeypatch
+):
+    from apps.trips import views as trip_views
+
+    target = create_trip(actor=owner, household=household, data={"name": "Target"})
+    tent = _gear_item(household, "Tent")
+    kit, _ = _kit_with_rows(actor=owner, household=household, entries=[(tent, 2)])
+    client.force_login(owner)
+    snapshot_display = trip_views.get_seed_source_display_snapshot
+
+    def delete_before_snapshot_acquisition(**kwargs):
+        GearKit.objects.filter(pk=kit.pk).delete()
+        return snapshot_display(**kwargs)
+
+    monkeypatch.setattr(trip_views, "get_seed_source_display_snapshot", delete_before_snapshot_acquisition)
+    response = client.get(reverse("trips:trip_gear_seed", args=[target.pk]), {
+        "source_kind": "kit", "source_id": str(kit.pk),
+    })
+
+    assert response.status_code == 200
+    assert b"refresh" in response.content.lower() or b"choose a source" in response.content.lower()
+
+
 def test_seed_trip_ui_does_not_disclose_foreign_or_unknown_source_ids(
     client, owner, other_owner, household, other_household
 ):

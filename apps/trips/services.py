@@ -281,7 +281,8 @@ def _model_snapshot(instance):
     return [[field.attname, str(getattr(instance, field.attname))] for field in instance._meta.concrete_fields]
 
 
-def _seed_source_snapshot(*, actor, target, source_kind, source_id):
+def _seed_source_snapshot_and_rows(*, actor, target, source_kind, source_id):
+    """Fetch locked display rows and describe exactly those objects in the signature."""
     kind = str(source_kind or "").strip()
     if kind not in _SOURCE_KINDS:
         raise ValidationError("Choose a saved kit or a completed trip as the source.")
@@ -301,16 +302,35 @@ def _seed_source_snapshot(*, actor, target, source_kind, source_id):
         if source.status != Trip.Status.COMPLETED:
             raise ValidationError("Only a completed trip can be used as a source.")
         rows = list(TripGear.objects.select_for_update().filter(trip=source).select_related("gear_item").order_by("pk"))
-    return [str(actor.pk), str(target.pk), kind, str(source.pk), _model_snapshot(source),
-            [[_model_snapshot(row), _model_snapshot(row.gear_item)] for row in rows]]
+    snapshot = [str(actor.pk), str(target.pk), kind, str(source.pk), _model_snapshot(source),
+                [[_model_snapshot(row), _model_snapshot(row.gear_item)] for row in rows]]
+    return rows, snapshot
+
+
+def _seed_source_snapshot(*, actor, target, source_kind, source_id):
+    return _seed_source_snapshot_and_rows(
+        actor=actor, target=target, source_kind=source_kind, source_id=source_id
+    )[1]
+
+
+@transaction.atomic
+def get_seed_source_display_snapshot(*, actor, target_trip_id, source_kind, source_id):
+    """Return the precise locked source rows for rendering and their signed state."""
+    target = _trip_for_member_actor(trip_id=target_trip_id, actor=actor, lock=True)
+    rows, snapshot = _seed_source_snapshot_and_rows(
+        actor=actor, target=target, source_kind=source_kind, source_id=source_id
+    )
+    token = signing.dumps(snapshot, salt=_SEED_SNAPSHOT_SALT, compress=True)
+    return rows, token
 
 
 @transaction.atomic
 def get_seed_source_snapshot_token(*, actor, target_trip_id, source_kind, source_id):
-    """Sign the complete source state shown by the seed form."""
-    target = _trip_for_member_actor(trip_id=target_trip_id, actor=actor, lock=True)
-    snapshot = _seed_source_snapshot(actor=actor, target=target, source_kind=source_kind, source_id=source_id)
-    return signing.dumps(snapshot, salt=_SEED_SNAPSHOT_SALT, compress=True)
+    """Sign the complete source state, for callers that do not render the rows."""
+    _rows, token = get_seed_source_display_snapshot(
+        actor=actor, target_trip_id=target_trip_id, source_kind=source_kind, source_id=source_id
+    )
+    return token
 
 
 def _selection_key(row_id):

@@ -16,7 +16,7 @@ from apps.trips.services import (
     create_gear_kit_from_trip,
     create_trip,
     delete_gear_kit,
-    get_seed_source_snapshot_token,
+    get_seed_source_display_snapshot,
     list_gear_kits,
     list_trips,
     remove_trip_gear,
@@ -85,25 +85,21 @@ def trip_gear_seed(request, trip_id):
     completed_trips = list(Trip.objects.for_household(household).filter(status=Trip.Status.COMPLETED).order_by("name", "pk"))
     sources = ([ ("kit", kit.pk, f"Saved kit · {kit.name}") for kit in kits ] +
                [("completed_trip", source.pk, f"Completed trip · {source.name}") for source in completed_trips])
-    source_rows = []
     source_kind = (request.POST.get("source_kind") if request.method == "POST" else request.GET.get("source_kind", ""))
     source_id = (request.POST.get("source_id") if request.method == "POST" else request.GET.get("source_id", ""))
     selected = next(((kind, pk) for kind, pk, _label in sources
                      if kind == source_kind and str(pk) == str(source_id)), None)
-    if selected:
-        kind, pk = selected
-        if kind == "kit":
-            source_rows = list(GearKitItem.objects.filter(kit_id=pk).select_related("gear_item").order_by("pk"))
-        else:
-            source_rows = list(TripGear.objects.filter(trip_id=pk).select_related("gear_item").order_by("pk"))
+    source_rows = []
     snapshot = ""
+    source_unavailable = False
     if selected:
         try:
-            snapshot = get_seed_source_snapshot_token(
+            source_rows, snapshot = get_seed_source_display_snapshot(
                 actor=request.user, target_trip_id=trip.pk, source_kind=selected[0], source_id=selected[1]
             )
         except (GearKit.DoesNotExist, Trip.DoesNotExist, ValidationError):
             selected = None
+            source_unavailable = True
     form = SeedTripGearForm(
         request.POST or None, sources=sources, source_rows=source_rows,
         initial={"source_kind": source_kind, "source_id": source_id, "source_snapshot": snapshot},
@@ -118,10 +114,7 @@ def trip_gear_seed(request, trip_id):
                 sources=sources, source_rows=source_rows,
                 initial={
                     "source_kind": chosen[0], "source_id": chosen[1],
-                    "source_snapshot": get_seed_source_snapshot_token(
-                        actor=request.user, target_trip_id=trip.pk,
-                        source_kind=chosen[0], source_id=chosen[1],
-                    ),
+                    "source_snapshot": snapshot,
                 },
             )
         else:
@@ -144,7 +137,7 @@ def trip_gear_seed(request, trip_id):
         "seed_rows": [{"gear": row.gear_item, "include": form[f"include_{row.gear_item.pk}"],
                        "quantity": form[f"quantity_{row.gear_item.pk}"]} for row in source_rows],
         "source_rows": source_rows, "has_sources": bool(sources), "source_selected": bool(selected),
-        "source_changed": source_changed,
+        "source_changed": source_changed, "source_unavailable": source_unavailable,
     })
 
 

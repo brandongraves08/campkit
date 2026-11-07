@@ -20,6 +20,7 @@
       {{ form.source_snapshot }}
       {% if form.non_field_errors %}<div role="alert" class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
       {% if source_changed %}<p role="alert">The source changed; <a href="?source_kind={{ form.source_kind.value|urlencode }}&amp;source_id={{ form.source_id.value|urlencode }}">refresh and try again</a>.</p>{% endif %}
+      {% if source_unavailable %}<p role="alert">That source is no longer available. Refresh the page and choose a current source.</p>{% endif %}
       <div class="field">
         {{ form.source_kind.label_tag }}{{ form.source_kind }}{{ form.source_kind.errors }}
       </div>
