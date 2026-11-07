@@ -8,15 +8,19 @@ from django.urls import reverse
 from django.utils import timezone
 from datetime import date, timedelta
 
+from apps.households.models import Membership, MembershipRole
 from apps.inventory.models import GearItem, InventoryVerification
+from apps.trips import services as trip_services
 from apps.trips.models import GearKit, GearKitItem, Trip, TripGear
 from apps.trips.services import (
+    add_trip_gear,
     cancel_trip,
     create_gear_kit_from_trip,
     create_trip,
     delete_gear_kit,
     list_gear_kits,
     packed_base_weight,
+    set_trip_gear_packed,
     update_gear_kit,
 )
 
@@ -441,3 +445,539 @@ def test_gear_kit_item_constraints_protect_gear_and_quantities(owner, household,
         GearItem.objects.get(pk=kit_only.pk).delete()
     assert GearKitItem.objects.filter(kit=kit, gear_item_id=kit_only.pk).exists()
     assert GearItem.objects.get(pk=kit_only.pk).name == "Lantern v2"
+
+
+# --------------------------------------------------------------------------- #
+# Trip seeding and immutable packing history (Task 2)
+# --------------------------------------------------------------------------- #
+
+
+def _gear_item(household, name, *, weight=500, quantity=1):
+    return GearItem.objects.create(household=household, name=name, weight_grams=weight, quantity=quantity)
+
+
+def _kit_with_rows(*, actor, household, entries):
+    """Create a kit whose ``{gear_id: GearKitItem}`` rows are independent sources."""
+    kit = GearKit.objects.create(household=household, created_by=actor, name=f"Kit {uuid.uuid4().hex[:8]}")
+    rows = {
+        gear.pk: GearKitItem.objects.create(kit=kit, gear_item=gear, quantity=quantity)
+        for gear, quantity in entries
+    }
+    return kit, rows
+
+
+def _set_trip_status(trip, status):
+    Trip.objects.filter(pk=trip.pk).update(status=status)
+    trip.refresh_from_db()
+
+
+def _target_rows(trip):
+    return {
+        row.gear_item_id: (row.quantity, row.packed)
+        for row in TripGear.objects.filter(trip=trip).order_by("pk")
+    }
+
+
+def _gear_snapshot(household):
+    return list(GearItem.objects.filter(household=household).order_by("pk").values())
+
+
+def _kit_snapshot(kit):
+    return list(
+        GearKitItem.objects.filter(kit=kit).order_by("pk").values("gear_item_id", "quantity")
+    )
+
+
+def _trip_snapshot(trip):
+    return Trip.objects.filter(pk=trip.pk).values().get()
+
+
+def _completed_source_trip(*, actor, household, entries):
+    trip = create_trip(actor=actor, household=household, data={"name": "Last autumn"})
+    rows = {gear.pk: TripGear.objects.create(trip=trip, gear_item=gear, quantity=qty, packed=True)
+            for gear, qty in entries}
+    _set_trip_status(trip, Trip.Status.COMPLETED)
+    return trip, rows
+
+
+def test_seed_trip_gear_copies_selected_kit_rows_with_quantity_overrides(owner, household):
+    target = create_trip(actor=owner, household=household, data={"name": "New trip"})
+    tent = _gear_item(household, "Tent", weight=1800)
+    stove = _gear_item(household, "Stove")
+    lantern = _gear_item(household, "Lantern", weight=300)
+    kit, rows = _kit_with_rows(
+        actor=owner, household=household, entries=[(tent, 2), (stove, 2), (lantern, 3)]
+    )
+    gear_before = _gear_snapshot(household)
+    kit_before = _kit_snapshot(kit)
+    trip_before = _trip_snapshot(target)
+
+    result = trip_services.seed_trip_gear(
+        actor=owner,
+        target_trip_id=target.pk,
+        source_kind="kit",
+        source_id=kit.pk,
+        selections=[(tent.pk, 3), (rows[stove.pk].pk, 1)],
+    )
+
+    assert (result.added, result.skipped) == (2, 0)
+    assert _target_rows(target) == {tent.pk: (3, False), stove.pk: (1, False)}
+    assert lantern.pk not in _target_rows(target)
+    assert _trip_snapshot(target) == trip_before
+    assert _gear_snapshot(household) == gear_before
+    assert _kit_snapshot(kit) == kit_before
+
+
+def test_seed_trip_gear_copies_selected_completed_trip_rows_without_history_mutation(owner, household):
+    target = create_trip(actor=owner, household=household, data={"name": "New trip"})
+    tent = _gear_item(household, "Tent", weight=1800)
+    stove = _gear_item(household, "Stove")
+    source, source_rows = _completed_source_trip(
+        actor=owner, household=household, entries=[(tent, 2), (stove, 1)]
+    )
+    source_before = list(TripGear.objects.filter(trip=source).order_by("pk").values())
+    gear_before = _gear_snapshot(household)
+
+    result = trip_services.seed_trip_gear(
+        actor=owner,
+        target_trip_id=target.pk,
+        source_kind="completed_trip",
+        source_id=source.pk,
+        selections=[(tent.pk, 1), (stove.pk, 3)],
+    )
+
+    assert (result.added, result.skipped) == (2, 0)
+    assert _target_rows(target) == {tent.pk: (1, False), stove.pk: (3, False)}
+    assert list(TripGear.objects.filter(trip=source).order_by("pk").values()) == source_before
+    assert _gear_snapshot(household) == gear_before
+    assert _trip_snapshot(source)["status"] == Trip.Status.COMPLETED
+
+
+def test_seed_trip_gear_skips_existing_target_rows_and_repeated_submission_is_idempotent(owner, household):
+    target = create_trip(actor=owner, household=household, data={"name": "New trip"})
+    tent = _gear_item(household, "Tent", weight=1800)
+    stove = _gear_item(household, "Stove")
+    tent_entry = add_trip_gear(trip_id=target.pk, gear_item_id=tent.pk, quantity=5, actor=owner)
+    set_trip_gear_packed(trip_id=target.pk, entry_id=tent_entry.pk, packed=True, actor=owner)
+    kit, rows = _kit_with_rows(actor=owner, household=household, entries=[(tent, 2), (stove, 1)])
+    selections = [(tent.pk, 2), (stove.pk, 1)]
+
+    first = trip_services.seed_trip_gear(
+        actor=owner, target_trip_id=target.pk, source_kind="kit", source_id=kit.pk, selections=selections
+    )
+    assert (first.added, first.skipped) == (1, 1)
+    assert _target_rows(target) == {tent.pk: (5, True), stove.pk: (1, False)}
+
+    second = trip_services.seed_trip_gear(
+        actor=owner,
+        target_trip_id=target.pk,
+        source_kind="kit",
+        source_id=kit.pk,
+        selections=[(tent.pk, 9), (stove.pk, 4)],
+    )
+    assert (second.added, second.skipped) == (0, 2)
+    assert _target_rows(target) == {tent.pk: (5, True), stove.pk: (1, False)}
+    assert TripGear.objects.filter(trip=target).count() == 2
+
+
+def test_seed_trip_gear_rejects_invalid_selections_without_writes(owner, household):
+    target = create_trip(actor=owner, household=household, data={"name": "New trip"})
+    tent = _gear_item(household, "Tent")
+    stove = _gear_item(household, "Stove")
+    kit, rows = _kit_with_rows(actor=owner, household=household, entries=[(tent, 2)])
+    other_kit, other_rows = _kit_with_rows(
+        actor=owner, household=household, entries=[(stove, 1)]
+    )
+    valid = tent.pk
+    invalid_selections = [
+        [],
+        None,
+        [(valid, 0)],
+        [(valid, -1)],
+        [(valid, "2")],
+        [(valid, 1.5)],
+        [(valid, True)],
+        [(valid, 32768)],
+        [(valid, 1), (valid, 2)],
+        [("not-a-uuid", 1)],
+        [(uuid.uuid4(), 1)],
+        [(stove.pk, 1)],
+        [(None, 1)],
+    ]
+    for selections in invalid_selections:
+        with pytest.raises(ValidationError):
+            trip_services.seed_trip_gear(
+                actor=owner,
+                target_trip_id=target.pk,
+                source_kind="kit",
+                source_id=kit.pk,
+                selections=selections,
+            )
+        assert not TripGear.objects.filter(trip=target).exists()
+
+    assert other_kit.pk != kit.pk
+    boundary = trip_services.seed_trip_gear(
+        actor=owner,
+        target_trip_id=target.pk,
+        source_kind="kit",
+        source_id=kit.pk,
+        selections=[(valid, 32767)],
+    )
+    assert (boundary.added, boundary.skipped) == (1, 0)
+    assert _target_rows(target) == {tent.pk: (32767, False)}
+
+
+def test_seed_trip_gear_rejects_non_completed_and_unknown_source_kinds(owner, household):
+    target = create_trip(actor=owner, household=household, data={"name": "New trip"})
+    tent = _gear_item(household, "Tent")
+    source = create_trip(actor=owner, household=household, data={"name": "Still planning"})
+    entry = TripGear.objects.create(trip=source, gear_item=tent, quantity=2)
+    for status in (Trip.Status.PLANNED, Trip.Status.CONFIRMED):
+        _set_trip_status(source, status)
+        with pytest.raises(ValidationError):
+            trip_services.seed_trip_gear(
+                actor=owner,
+                target_trip_id=target.pk,
+                source_kind="completed_trip",
+                source_id=source.pk,
+                selections=[(entry.pk, 1)],
+            )
+        assert not TripGear.objects.filter(trip=target).exists()
+
+    with pytest.raises(ValidationError):
+        trip_services.seed_trip_gear(
+            actor=owner,
+            target_trip_id=target.pk,
+            source_kind="saved_trip",
+            source_id=source.pk,
+            selections=[(entry.pk, 1)],
+        )
+    assert not TripGear.objects.filter(trip=target).exists()
+
+
+def test_seed_trip_gear_does_not_disclose_foreign_source_or_target_ids(
+    owner, other_owner, household, other_household
+):
+    target = create_trip(actor=owner, household=household, data={"name": "New trip"})
+    own_gear = _gear_item(household, "Tent")
+    kit, rows = _kit_with_rows(actor=owner, household=household, entries=[(own_gear, 1)])
+    selection = [(own_gear.pk, 1)]
+
+    foreign_gear = _gear_item(other_household, "Foreign tent")
+    foreign_kit, foreign_rows = _kit_with_rows(
+        actor=other_owner, household=other_household, entries=[(foreign_gear, 1)]
+    )
+    foreign_trip, foreign_trip_rows = _completed_source_trip(
+        actor=other_owner, household=other_household, entries=[(foreign_gear, 1)]
+    )
+    unknown = uuid.uuid4()
+
+    expected_kit = (GearKit.DoesNotExist, "Gear kit not found.")
+    for source_id in (foreign_kit.pk, unknown):
+        assert _exception_signature(
+            lambda source_id=source_id: trip_services.seed_trip_gear(
+                actor=owner,
+                target_trip_id=target.pk,
+                source_kind="kit",
+                source_id=source_id,
+                selections=selection,
+            )
+        ) == expected_kit
+
+    expected_trip = (Trip.DoesNotExist, "Trip not found.")
+    for source_id in (foreign_trip.pk, unknown):
+        assert _exception_signature(
+            lambda source_id=source_id: trip_services.seed_trip_gear(
+                actor=owner,
+                target_trip_id=target.pk,
+                source_kind="completed_trip",
+                source_id=source_id,
+                selections=selection,
+            )
+        ) == expected_trip
+
+    for target_id in (foreign_trip.pk, unknown, "not-a-uuid"):
+        assert _exception_signature(
+            lambda target_id=target_id: trip_services.seed_trip_gear(
+                actor=owner,
+                target_trip_id=target_id,
+                source_kind="kit",
+                source_id=kit.pk,
+                selections=selection,
+            )
+        ) == expected_trip
+
+    assert _exception_signature(
+        lambda: trip_services.seed_trip_gear(
+            actor=owner,
+            target_trip_id=target.pk,
+            source_kind="kit",
+            source_id="not-a-uuid",
+            selections=selection,
+        )
+    ) == expected_kit
+
+    for stale_row_id in (foreign_gear.pk, uuid.uuid4()):
+        assert _exception_signature(
+            lambda stale_row_id=stale_row_id: trip_services.seed_trip_gear(
+                actor=owner,
+                target_trip_id=target.pk,
+                source_kind="kit",
+                source_id=kit.pk,
+                selections=[(stale_row_id, 1)],
+            )
+        )[0] is ValidationError
+
+    assert not TripGear.objects.filter(trip=target).exists()
+    assert TripGear.objects.filter(trip=foreign_trip).count() == len(foreign_trip_rows)
+
+
+def test_seed_trip_gear_keeps_multi_household_sources_inside_the_target_household(
+    owner, other_owner, household, other_household
+):
+    Membership.objects.create(user=owner, household=other_household, role=MembershipRole.MEMBER)
+    target = create_trip(actor=owner, household=household, data={"name": "New trip"})
+    foreign_gear = _gear_item(other_household, "Foreign tent")
+    foreign_kit, foreign_rows = _kit_with_rows(
+        actor=other_owner, household=other_household, entries=[(foreign_gear, 1)]
+    )
+    foreign_trip, foreign_trip_rows = _completed_source_trip(
+        actor=other_owner, household=other_household, entries=[(foreign_gear, 1)]
+    )
+
+    with pytest.raises(ValidationError):
+        trip_services.seed_trip_gear(
+            actor=owner,
+            target_trip_id=target.pk,
+            source_kind="kit",
+            source_id=foreign_kit.pk,
+            selections=[(foreign_gear.pk, 1)],
+        )
+    with pytest.raises(ValidationError):
+        trip_services.seed_trip_gear(
+            actor=owner,
+            target_trip_id=target.pk,
+            source_kind="completed_trip",
+            source_id=foreign_trip.pk,
+            selections=[(foreign_gear.pk, 1)],
+        )
+    assert not TripGear.objects.filter(trip=target).exists()
+
+
+def test_seed_trip_gear_rejects_stale_source_rows_without_partial_rows(owner, household):
+    target = create_trip(actor=owner, household=household, data={"name": "New trip"})
+    tent = _gear_item(household, "Tent")
+    stove = _gear_item(household, "Stove")
+    kit, rows = _kit_with_rows(actor=owner, household=household, entries=[(tent, 2), (stove, 1)])
+    stale_kit_gear = stove.pk
+    GearKitItem.objects.filter(kit=kit, gear_item_id=stale_kit_gear).delete()
+
+    with pytest.raises(ValidationError):
+        trip_services.seed_trip_gear(
+            actor=owner,
+            target_trip_id=target.pk,
+            source_kind="kit",
+            source_id=kit.pk,
+            selections=[(tent.pk, 1), (stale_kit_gear, 1)],
+        )
+    assert not TripGear.objects.filter(trip=target).exists()
+
+    source, source_rows = _completed_source_trip(
+        actor=owner, household=household, entries=[(tent, 2), (stove, 1)]
+    )
+    stale_trip_gear = stove.pk
+    TripGear.objects.filter(trip=source, gear_item_id=stale_trip_gear).delete()
+    with pytest.raises(ValidationError):
+        trip_services.seed_trip_gear(
+            actor=owner,
+            target_trip_id=target.pk,
+            source_kind="completed_trip",
+            source_id=source.pk,
+            selections=[(tent.pk, 1), (stale_trip_gear, 1)],
+        )
+    assert not TripGear.objects.filter(trip=target).exists()
+
+
+def test_seed_trip_gear_rolls_back_every_row_when_a_write_fails(owner, household, monkeypatch):
+    target = create_trip(actor=owner, household=household, data={"name": "New trip"})
+    tent = _gear_item(household, "Tent")
+    stove = _gear_item(household, "Stove")
+    kit, rows = _kit_with_rows(actor=owner, household=household, entries=[(tent, 2), (stove, 1)])
+    original_save = TripGear.save
+    calls = {"count": 0}
+
+    def flaky_save(self, *args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise IntegrityError("simulated insert failure")
+        return original_save(self, *args, **kwargs)
+
+    monkeypatch.setattr(TripGear, "save", flaky_save)
+    with pytest.raises(IntegrityError):
+        trip_services.seed_trip_gear(
+            actor=owner,
+            target_trip_id=target.pk,
+            source_kind="kit",
+            source_id=kit.pk,
+            selections=[(tent.pk, 2), (stove.pk, 1)],
+        )
+
+    assert calls["count"] == 2
+    assert not TripGear.objects.filter(trip=target).exists()
+
+
+def test_remove_trip_gear_removes_only_the_target_association(owner, household):
+    target = create_trip(actor=owner, household=household, data={"name": "New trip"})
+    tent = _gear_item(household, "Tent", weight=1800)
+    stove = _gear_item(household, "Stove")
+    tent_entry = add_trip_gear(trip_id=target.pk, gear_item_id=tent.pk, quantity=2, actor=owner)
+    add_trip_gear(trip_id=target.pk, gear_item_id=stove.pk, quantity=1, actor=owner)
+    source, _source_rows = _completed_source_trip(
+        actor=owner, household=household, entries=[(tent, 3), (stove, 1)]
+    )
+    kit, _kit_rows = _kit_with_rows(actor=owner, household=household, entries=[(tent, 3), (stove, 1)])
+    source_before = list(TripGear.objects.filter(trip=source).order_by("pk").values())
+    kit_before = _kit_snapshot(kit)
+    gear_before = _gear_snapshot(household)
+
+    assert trip_services.remove_trip_gear(
+        actor=owner, trip_id=target.pk, entry_id=tent_entry.pk
+    ) is None
+
+    assert _target_rows(target) == {stove.pk: (1, False)}
+    assert list(TripGear.objects.filter(trip=source).order_by("pk").values()) == source_before
+    assert _kit_snapshot(kit) == kit_before
+    assert _gear_snapshot(household) == gear_before
+
+
+def test_remove_trip_gear_rejects_unknown_or_other_trip_entries(owner, household):
+    target = create_trip(actor=owner, household=household, data={"name": "New trip"})
+    tent = _gear_item(household, "Tent")
+    TripGear.objects.create(trip=target, gear_item=tent, quantity=1)
+    source, source_rows = _completed_source_trip(
+        actor=owner, household=household, entries=[(tent, 1)]
+    )
+    expected = (TripGear.DoesNotExist, "Trip gear not found.")
+
+    for entry_id in (uuid.uuid4(), source_rows[tent.pk].pk, "not-a-uuid"):
+        assert _exception_signature(
+            lambda entry_id=entry_id: trip_services.remove_trip_gear(
+                actor=owner, trip_id=target.pk, entry_id=entry_id
+            )
+        ) == expected
+
+    assert _target_rows(target) == {tent.pk: (1, False)}
+    assert TripGear.objects.filter(trip=source).count() == 1
+
+
+@pytest.mark.parametrize("status", [Trip.Status.COMPLETED, Trip.Status.CANCELLED])
+def test_read_only_trip_statuses_reject_every_packing_mutation(owner, household, status):
+    target = create_trip(actor=owner, household=household, data={"name": "Finished trip"})
+    tent = _gear_item(household, "Tent")
+    stove = _gear_item(household, "Stove")
+    lantern = _gear_item(household, "Lantern")
+    tent_entry = add_trip_gear(trip_id=target.pk, gear_item_id=tent.pk, quantity=2, actor=owner)
+    kit, rows = _kit_with_rows(actor=owner, household=household, entries=[(stove, 1)])
+    _set_trip_status(target, status)
+    rows_before = _target_rows(target)
+    trip_before = _trip_snapshot(target)
+    gear_before = _gear_snapshot(household)
+
+    operations = (
+        lambda: add_trip_gear(
+            trip_id=target.pk, gear_item_id=lantern.pk, quantity=1, actor=owner
+        ),
+        lambda: set_trip_gear_packed(
+            trip_id=target.pk, entry_id=tent_entry.pk, packed=True, actor=owner
+        ),
+        lambda: trip_services.seed_trip_gear(
+            actor=owner,
+            target_trip_id=target.pk,
+            source_kind="kit",
+            source_id=kit.pk,
+            selections=[(stove.pk, 1)],
+        ),
+        lambda: trip_services.remove_trip_gear(
+            actor=owner, trip_id=target.pk, entry_id=tent_entry.pk
+        ),
+    )
+    for operation in operations:
+        with pytest.raises(ValidationError):
+            operation()
+
+    assert _target_rows(target) == rows_before
+    assert _trip_snapshot(target) == trip_before
+    assert _gear_snapshot(household) == gear_before
+
+
+@pytest.mark.parametrize("status", [Trip.Status.PLANNED, Trip.Status.CONFIRMED])
+def test_mutable_trip_statuses_allow_seed_add_pack_and_remove(owner, household, status):
+    target = create_trip(actor=owner, household=household, data={"name": "Active trip"})
+    stove = _gear_item(household, "Stove")
+    lantern = _gear_item(household, "Lantern")
+    kit, rows = _kit_with_rows(actor=owner, household=household, entries=[(stove, 1)])
+    _set_trip_status(target, status)
+
+    seeded = trip_services.seed_trip_gear(
+        actor=owner,
+        target_trip_id=target.pk,
+        source_kind="kit",
+        source_id=kit.pk,
+        selections=[(stove.pk, 2)],
+    )
+    assert (seeded.added, seeded.skipped) == (1, 0)
+    added = add_trip_gear(trip_id=target.pk, gear_item_id=lantern.pk, quantity=1, actor=owner)
+    set_trip_gear_packed(trip_id=target.pk, entry_id=added.pk, packed=True, actor=owner)
+    stove_entry = TripGear.objects.get(trip=target, gear_item=stove)
+    trip_services.remove_trip_gear(actor=owner, trip_id=target.pk, entry_id=stove_entry.pk)
+
+    assert _target_rows(target) == {lantern.pk: (1, True)}
+
+
+def test_packing_mutations_do_not_disclose_foreign_trip_ids(
+    owner, other_owner, household, other_household
+):
+    target = create_trip(actor=owner, household=household, data={"name": "New trip"})
+    own_gear = _gear_item(household, "Tent")
+    kit, rows = _kit_with_rows(actor=owner, household=household, entries=[(own_gear, 1)])
+    foreign_trip = create_trip(actor=other_owner, household=other_household, data={"name": "Foreign"})
+    foreign_gear = _gear_item(other_household, "Foreign tent")
+    foreign_entry = TripGear.objects.create(trip=foreign_trip, gear_item=foreign_gear, quantity=1)
+    unknown = uuid.uuid4()
+    expected = (Trip.DoesNotExist, "Trip not found.")
+
+    actions = (
+        lambda trip_id: add_trip_gear(
+            trip_id=trip_id, gear_item_id=own_gear.pk, quantity=1, actor=owner
+        ),
+        lambda trip_id: set_trip_gear_packed(
+            trip_id=trip_id, entry_id=foreign_entry.pk, packed=True, actor=owner
+        ),
+        lambda trip_id: trip_services.remove_trip_gear(
+            actor=owner, trip_id=trip_id, entry_id=foreign_entry.pk
+        ),
+        lambda trip_id: trip_services.seed_trip_gear(
+            actor=owner,
+            target_trip_id=trip_id,
+            source_kind="kit",
+            source_id=kit.pk,
+            selections=[(own_gear.pk, 1)],
+        ),
+    )
+    for action in actions:
+        assert _exception_signature(lambda: action(foreign_trip.pk)) == expected
+        assert _exception_signature(lambda: action(unknown)) == expected
+        assert _exception_signature(lambda: action("not-a-uuid")) == expected
+
+    expected_entry = (TripGear.DoesNotExist, "Trip gear not found.")
+    for entry_id in (foreign_entry.pk, uuid.uuid4(), "not-a-uuid"):
+        assert _exception_signature(
+            lambda entry_id=entry_id: set_trip_gear_packed(
+                trip_id=target.pk, entry_id=entry_id, packed=True, actor=owner
+            )
+        ) == expected_entry
+
+    assert not TripGear.objects.filter(trip=target).exists()
+    assert TripGear.objects.filter(trip=foreign_trip).count() == 1
+    foreign_entry.refresh_from_db()
+    assert foreign_entry.packed is False
