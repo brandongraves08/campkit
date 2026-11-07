@@ -1,5 +1,7 @@
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.db.models.deletion import ProtectedError
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.dateparse import parse_datetime
@@ -57,7 +59,12 @@ def gear_edit(request, item_id):
 def gear_delete(request, item_id):
     household = current_household(request)
     item = get_object_or_404(GearItem.objects.for_household(household), pk=item_id)
-    delete_gear_item(actor=request.user, household=household, item_id=item.pk)
+    try:
+        delete_gear_item(actor=request.user, household=household, item_id=item.pk)
+    except ProtectedError:
+        messages.error(request, "This gear is still used by a trip or saved kit. Remove it from trips or kits first, then try again.")
+    else:
+        messages.success(request, "Shared gear deleted.")
     return redirect("inventory:gear_list")
 
 

@@ -377,6 +377,38 @@ button {
   border-top: 0;
 }
 
+.kit-edit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(9rem, 12rem);
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.kit-edit-row > label:first-child {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.kit-edit-row input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: 0 0 auto;
+}
+
+fieldset {
+  min-width: 0;
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+legend {
+  padding: 0 0.35rem;
+  font-weight: 700;
+}
+
 .item-head {
   display: flex;
   flex-wrap: wrap;
@@ -707,6 +739,10 @@ summary {
   .button-row {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .kit-edit-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .summary-strip {

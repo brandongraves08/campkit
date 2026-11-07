@@ -17,6 +17,10 @@
     </p>
     {% if trip.conditions %}<p class="meta">Conditions: {{ trip.conditions }}</p>{% endif %}
   </div>
+  <div class="button-row">
+    {% if gear %}<a class="button button-primary" href="{% url 'trips:gear_kit_create_from_trip' trip.pk %}">Save packing list as kit</a>{% endif %}
+    <a class="button" href="{% url 'trips:gear_kit_list' %}">Saved gear kits</a>
+  </div>
 
   <div class="summary-strip" aria-label="Trip readiness">
     <p><strong>{{ readiness.packed_items }} of {{ readiness.total_items }}</strong> packed</p>

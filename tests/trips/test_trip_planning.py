@@ -90,6 +90,131 @@ def test_trip_detail_is_household_scoped_and_packing_list_is_usable(client, owne
     assert response.status_code == 404
 
 
+def test_kit_management_lists_only_household_kits_and_has_empty_state(client, owner, household, other_owner, other_household):
+    from apps.trips.services import create_gear_kit_from_trip
+
+    own_trip, _, _ = _trip_with_gear(actor=owner, household=household, trip_name="Own source")
+    foreign_trip, _, _ = _trip_with_gear(actor=other_owner, household=other_household, trip_name="Foreign source")
+    own = create_gear_kit_from_trip(actor=owner, trip_id=own_trip.pk, name="Own kit")
+    create_gear_kit_from_trip(actor=other_owner, trip_id=foreign_trip.pk, name="Foreign kit")
+    client.force_login(owner)
+    response = client.get(reverse("trips:gear_kit_list"))
+    assert response.status_code == 200
+    assert b"Own kit" in response.content
+    assert b"Foreign kit" not in response.content
+    assert str(own.pk).encode() in response.content
+
+
+def test_save_trip_as_kit_success_and_empty_trip_validation(client, owner, household):
+    trip, tent, _ = _trip_with_gear(actor=owner, household=household)
+    empty_trip = create_trip(actor=owner, household=household, data={"name": "Empty"})
+    client.force_login(owner)
+    response = client.post(reverse("trips:gear_kit_create_from_trip", args=[trip.pk]), {"name": "Weekend kit"})
+    assert response.status_code == 302
+    kit = GearKit.objects.get(household=household, name="Weekend kit")
+    assert kit.items.get(gear_item=tent).quantity == 2
+    response = client.post(reverse("trips:gear_kit_create_from_trip", args=[empty_trip.pk]), {"name": "Empty kit"})
+    assert response.status_code == 200
+    assert b"at least one gear item" in response.content
+    assert not GearKit.objects.filter(name="Empty kit").exists()
+
+
+def test_kit_management_edits_name_items_and_preserves_invalid_quantity(client, owner, household):
+    trip, tent, stove = _trip_with_gear(actor=owner, household=household)
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Old name")
+    client.force_login(owner)
+    response = client.post(reverse("trips:gear_kit_edit", args=[kit.pk]), {
+        "name": "New name", f"include_{tent.pk}": "on", f"quantity_{tent.pk}": "3",
+        f"include_{stove.pk}": "on", f"quantity_{stove.pk}": "zero",
+    })
+    assert response.status_code == 200
+    assert b"New name" in response.content
+    assert b"zero" in response.content
+    kit.refresh_from_db()
+    assert kit.name == "Old name"
+    assert kit.items.get(gear_item=tent).quantity == 2
+    response = client.post(reverse("trips:gear_kit_edit", args=[kit.pk]), {
+        "name": "New name", f"include_{tent.pk}": "on", f"quantity_{tent.pk}": "3",
+        f"quantity_{stove.pk}": "1",
+    })
+    assert response.status_code == 302
+    kit.refresh_from_db()
+    assert kit.name == "New name"
+    assert list(kit.items.values_list("gear_item_id", "quantity")) == [(tent.pk, 3)]
+
+
+def test_unselected_kit_row_does_not_require_a_quantity(client, owner, household):
+    trip, tent, stove = _trip_with_gear(actor=owner, household=household)
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Quantity optional")
+    client.force_login(owner)
+    response = client.post(reverse("trips:gear_kit_edit", args=[kit.pk]), {
+        "name": "Quantity optional", f"include_{tent.pk}": "on", f"quantity_{tent.pk}": "1",
+        f"quantity_{stove.pk}": "",
+    })
+    assert response.status_code == 302
+    assert list(kit.items.values_list("gear_item_id", "quantity")) == [(tent.pk, 1)]
+
+
+def test_kit_duplicate_name_and_foreign_id_do_not_disclose_or_mutate(client, owner, other_owner, household, other_household):
+    trip, _, _ = _trip_with_gear(actor=owner, household=household)
+    foreign_trip, _, _ = _trip_with_gear(actor=other_owner, household=other_household)
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="First")
+    create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Second")
+    foreign = create_gear_kit_from_trip(actor=other_owner, trip_id=foreign_trip.pk, name="Secret kit")
+    client.force_login(owner)
+    response = client.post(reverse("trips:gear_kit_edit", args=[kit.pk]), {
+        "name": "Second", **{f"include_{row.gear_item_id}": "on" for row in kit.items.all()},
+        **{f"quantity_{row.gear_item_id}": str(row.quantity) for row in kit.items.all()},
+    })
+    assert response.status_code == 200
+    assert b"already exists" in response.content
+    response = client.get(reverse("trips:gear_kit_edit", args=[foreign.pk]))
+    assert response.status_code == 404
+    assert b"Secret kit" not in response.content
+
+
+def test_kit_delete_is_post_only_csrf_protected_and_removes_kit_only(client, owner, household):
+    trip, tent, _ = _trip_with_gear(actor=owner, household=household)
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Delete me")
+    client.force_login(owner)
+    assert client.get(reverse("trips:gear_kit_delete", args=[kit.pk])).status_code == 405
+    response = client.post(reverse("trips:gear_kit_delete", args=[kit.pk]))
+    assert response.status_code == 302
+    assert not GearKit.objects.filter(pk=kit.pk).exists()
+    assert GearItem.objects.filter(pk=tent.pk).exists()
+    assert TripGear.objects.filter(trip=trip, gear_item=tent).exists()
+
+
+def test_kit_delete_rejects_post_without_csrf_token(owner, household):
+    from django.test import Client
+
+    trip, _, _ = _trip_with_gear(actor=owner, household=household)
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="CSRF kit")
+    csrf_client = Client(enforce_csrf_checks=True)
+    csrf_client.force_login(owner)
+    response = csrf_client.post(reverse("trips:gear_kit_delete", args=[kit.pk]))
+    assert response.status_code == 403
+    assert GearKit.objects.filter(pk=kit.pk).exists()
+
+
+def test_gear_delete_protection_is_friendly_and_rolls_back_audit(client, owner, household):
+    from apps.audit.models import InventoryChange
+    from apps.inventory.services import create_gear_item
+
+    trip = create_trip(actor=owner, household=household, data={"name": "Protected trip"})
+    gear = create_gear_item(actor=owner, household=household, data={"name": "Protected tent"})
+    add_trip_gear(trip_id=trip.pk, gear_item_id=gear.pk, quantity=1, actor=owner)
+    before_audit = InventoryChange.objects.filter(object_id=str(gear.pk)).count()
+    client.force_login(owner)
+    response = client.post(reverse("inventory:gear_delete", args=[gear.pk]))
+    assert response.status_code == 302
+    page = client.get(response["Location"])
+    assert b"remove it from trips or kits first" in page.content.lower(), page.content.decode()
+    assert GearItem.objects.filter(pk=gear.pk).exists()
+    assert TripGear.objects.filter(trip=trip, gear_item=gear).exists()
+    assert InventoryChange.objects.filter(object_id=str(gear.pk)).count() == before_audit
+
+
 def test_trip_dates_cannot_end_before_start(owner, household):
     with pytest.raises(ValidationError):
         create_trip(actor=owner, household=household, data={

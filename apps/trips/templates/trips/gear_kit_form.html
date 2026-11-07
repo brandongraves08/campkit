@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} · CampKit{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <h1>{{ title }}</h1>
+    {% if trip %}<p class="lede">Save the current packing list from {{ trip.name }} as a household kit.</p>{% endif %}
+    {% if kit %}<p class="lede">Choose the shared gear and quantities this kit should contain. Removing a row here never deletes shared gear or trip entries.</p>{% endif %}
+  </div>
+  <div class="card">
+    <form method="post">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="form-errors" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+      <div class="field">
+        {{ form.name.label_tag }}
+        {{ form.name }}
+        {{ form.name.errors }}
+      </div>
+      {% if kit %}
+        <fieldset>
+          <legend>Gear in this kit</legend>
+          {% if kit_rows %}
+            <ul class="item-list">
+              {% for row in kit_rows %}
+                <li>
+                  <div class="kit-edit-row">
+                    <label>{{ row.include }} <span>{{ row.gear.name }}</span></label>
+                    <label>{{ row.quantity.label }} {{ row.quantity }}</label>
+                  </div>
+                  {{ row.include.errors }}{{ row.quantity.errors }}
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="empty-state">Add shared gear before editing this kit.</p>
+          {% endif %}
+        </fieldset>
+      {% endif %}
+      <div class="button-row">
+        <button class="button button-primary" type="submit">{% if kit %}Save kit{% else %}Save as kit{% endif %}</button>
+        <a class="button" href="{% url 'trips:gear_kit_list' %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

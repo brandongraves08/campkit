@@ -2,21 +2,27 @@ from django import forms
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.households.permissions import current_household
 from apps.inventory.services import list_gear
+from apps.trips.forms import GearKitForm, SaveGearKitForm
 from apps.trips.models import Trip, TripGear
 from apps.trips.services import (
     add_trip_gear,
     cancel_trip,
+    create_gear_kit_from_trip,
     create_trip,
+    delete_gear_kit,
+    list_gear_kits,
     list_trips,
     set_trip_gear_packed,
     set_trip_status,
     trip_packing_list,
     trip_readiness,
+    update_gear_kit,
 )
 
 
@@ -25,6 +31,16 @@ class TripForm(forms.ModelForm):
         model = Trip
         fields = ("name", "destination", "start_date", "end_date", "party_size", "conditions")
         widgets = {"start_date": forms.DateInput(attrs={"type": "date"}), "end_date": forms.DateInput(attrs={"type": "date"})}
+
+
+def _add_validation_error(form, error):
+    if getattr(error, "error_dict", None):
+        for field, errors in error.error_dict.items():
+            for message in errors:
+                form.add_error(field if field in form.fields else None, message)
+    else:
+        for message in error.messages:
+            form.add_error(None, message)
 
 
 @login_required
@@ -51,6 +67,76 @@ def trip_detail(request, trip_id):
         "gear": trip_packing_list(trip_id=trip.pk, actor=request.user),
         "available_gear": list_gear(actor=request.user, household=household),
     })
+
+
+@login_required
+def gear_kit_list(request):
+    household = current_household(request)
+    return render(request, "trips/gear_kit_list.html", {
+        "nav": "trips", "kits": list_gear_kits(actor=request.user, household=household),
+    })
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def gear_kit_create_from_trip(request, trip_id):
+    household = current_household(request)
+    trip = get_object_or_404(Trip.objects.for_household(household), pk=trip_id)
+    form = SaveGearKitForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            kit = create_gear_kit_from_trip(actor=request.user, trip_id=trip.pk, name=form.cleaned_data["name"])
+        except ValidationError as exc:
+            _add_validation_error(form, exc)
+        else:
+            messages.success(request, f"Saved {kit.name} as a reusable kit.")
+            return redirect("trips:gear_kit_list")
+    return render(request, "trips/gear_kit_form.html", {
+        "nav": "trips", "form": form, "title": "Save packing list as a kit", "trip": trip,
+    })
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def gear_kit_edit(request, kit_id):
+    household = current_household(request)
+    kit = next((candidate for candidate in list_gear_kits(actor=request.user, household=household)
+                if candidate.pk == kit_id), None)
+    if kit is None:
+        raise Http404("Saved kit not found.")
+    gear_items = list(list_gear(actor=request.user, household=household).order_by("name", "pk"))
+    quantities = {str(item.gear_item_id): item.quantity for item in kit.items.all()}
+    form = GearKitForm(
+        request.POST or None, gear_items=gear_items, quantities=quantities, initial={"name": kit.name},
+    )
+    if request.method == "POST" and form.is_valid():
+        try:
+            update_gear_kit(actor=request.user, kit_id=kit.pk, name=form.cleaned_data["name"],
+                            items=form.selected_items())
+        except ValidationError as exc:
+            _add_validation_error(form, exc)
+        else:
+            messages.success(request, f"Updated {form.cleaned_data['name']}.")
+            return redirect("trips:gear_kit_list")
+    return render(request, "trips/gear_kit_form.html", {
+        "nav": "trips", "form": form, "title": "Edit saved kit", "kit": kit,
+        "kit_rows": [{"gear": gear, "include": form[f"include_{gear.pk}"],
+                      "quantity": form[f"quantity_{gear.pk}"]} for gear in gear_items],
+    })
+
+
+@login_required
+@require_POST
+def gear_kit_delete(request, kit_id):
+    household = current_household(request)
+    kits = list_gear_kits(actor=request.user, household=household)
+    kit = next((candidate for candidate in kits if candidate.pk == kit_id), None)
+    if kit is None:
+        raise Http404("Saved kit not found.")
+    name = kit.name
+    delete_gear_kit(actor=request.user, kit_id=kit.pk)
+    messages.success(request, f"Deleted {name}. Shared gear and trip lists were not changed.")
+    return redirect("trips:gear_kit_list")
 
 
 @login_required
