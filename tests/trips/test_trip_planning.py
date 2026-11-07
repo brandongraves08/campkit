@@ -2,15 +2,38 @@ import uuid
 
 import pytest
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import IntegrityError, transaction
+from django.db.models.deletion import ProtectedError
 from django.urls import reverse
 from django.utils import timezone
 from datetime import date, timedelta
 
 from apps.inventory.models import GearItem, InventoryVerification
-from apps.trips.models import Trip, TripGear
-from apps.trips.services import cancel_trip, create_trip, packed_base_weight
+from apps.trips.models import GearKit, GearKitItem, Trip, TripGear
+from apps.trips.services import (
+    cancel_trip,
+    create_gear_kit_from_trip,
+    create_trip,
+    delete_gear_kit,
+    list_gear_kits,
+    packed_base_weight,
+    update_gear_kit,
+)
 
 pytestmark = pytest.mark.django_db
+
+
+def _trip_with_gear(*, actor, household, trip_name="Pine weekend"):
+    trip = create_trip(actor=actor, household=household, data={"name": trip_name})
+    tent = GearItem.objects.create(household=household, name="Tent", weight_grams=1800, quantity=3)
+    stove = GearItem.objects.create(household=household, name="Stove", weight_grams=500)
+    TripGear.objects.create(trip=trip, gear_item=tent, quantity=2, packed=True)
+    TripGear.objects.create(trip=trip, gear_item=stove, quantity=1)
+    return trip, tent, stove
+
+
+def _kit_items(kit):
+    return {item.gear_item_id: item.quantity for item in kit.items.all()}
 
 
 def test_trip_lifecycle_is_household_scoped(owner, other_owner, household, other_household):
@@ -87,3 +110,209 @@ def test_packing_an_unknown_or_foreign_gear_id_is_a_message_not_a_crash(
     )
     assert malformed.status_code == 200, "a malformed id is a message, not a 500"
     assert not TripGear.objects.filter(trip=trip).exists()
+
+
+def test_gear_kit_snapshot_preserves_source_trip_and_shared_gear(owner, household):
+    trip, tent, stove = _trip_with_gear(actor=owner, household=household)
+    trip_before = list(
+        TripGear.objects.filter(trip=trip).order_by("pk").values("gear_item_id", "quantity", "packed")
+    )
+    gear_before = list(GearItem.objects.filter(household=household).order_by("pk").values())
+
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="  Base camp  ")
+
+    assert kit.name == "Base camp"
+    assert kit.household_id == household.pk
+    assert kit.created_by_id == owner.pk
+    assert _kit_items(kit) == {tent.pk: 2, stove.pk: 1}
+    assert list(
+        TripGear.objects.filter(trip=trip).order_by("pk").values("gear_item_id", "quantity", "packed")
+    ) == trip_before
+    assert list(GearItem.objects.filter(household=household).order_by("pk").values()) == gear_before
+
+
+def test_gear_kit_snapshot_rejects_an_empty_trip_without_writes(owner, household):
+    trip = create_trip(actor=owner, household=household, data={"name": "No gear yet"})
+
+    with pytest.raises(ValidationError):
+        create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Empty kit")
+
+    assert not GearKit.objects.exists()
+    assert not GearKitItem.objects.exists()
+
+
+def test_gear_kit_names_are_trimmed_and_case_insensitively_unique_per_household(
+    owner, other_owner, household, other_household
+):
+    trip, _tent, _stove = _trip_with_gear(actor=owner, household=household)
+    other_trip, _other_tent, _other_stove = _trip_with_gear(
+        actor=other_owner, household=other_household, trip_name="Other trip"
+    )
+
+    create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Base Camp")
+
+    with pytest.raises(ValidationError):
+        create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="  base camp ")
+    for bad_name in ("   ", "x" * 161):
+        with pytest.raises(ValidationError):
+            create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name=bad_name)
+
+    other_kit = create_gear_kit_from_trip(actor=other_owner, trip_id=other_trip.pk, name="base camp")
+    assert other_kit.name == "base camp"
+    assert GearKit.objects.filter(household=household).count() == 1
+
+
+def test_gear_kit_name_uniqueness_is_enforced_by_the_database(owner, household):
+    trip, _tent, _stove = _trip_with_gear(actor=owner, household=household)
+    create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Base Camp")
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        GearKit.objects.create(household=household, created_by=owner, name="BASE CAMP")
+
+
+def test_list_gear_kits_is_household_scoped(owner, member, other_owner, household, other_household):
+    trip, _tent, _stove = _trip_with_gear(actor=owner, household=household)
+    other_trip, _other_tent, _other_stove = _trip_with_gear(
+        actor=other_owner, household=other_household, trip_name="Other trip"
+    )
+    own_kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Base camp")
+    create_gear_kit_from_trip(actor=other_owner, trip_id=other_trip.pk, name="Base camp")
+
+    assert list(list_gear_kits(actor=owner, household=household)) == [own_kit]
+    assert list(list_gear_kits(actor=member, household=household)) == [own_kit]
+    with pytest.raises(PermissionDenied):
+        list_gear_kits(actor=owner, household=other_household)
+    with pytest.raises(PermissionDenied):
+        list_gear_kits(actor=other_owner, household=household)
+
+
+def test_update_gear_kit_renames_and_replaces_membership(owner, household):
+    trip, tent, stove = _trip_with_gear(actor=owner, household=household)
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Base camp")
+    extra = GearItem.objects.create(household=household, name="Lantern", weight_grams=300)
+    gear_before = list(GearItem.objects.filter(household=household).order_by("pk").values())
+    trip_before = list(TripGear.objects.filter(trip=trip).order_by("pk").values())
+
+    updated = update_gear_kit(
+        actor=owner, kit_id=kit.pk, name="  Winter base  ", items=[(stove.pk, 3), (extra.pk, 1)]
+    )
+
+    assert updated.pk == kit.pk
+    assert updated.name == "Winter base"
+    assert _kit_items(updated) == {stove.pk: 3, extra.pk: 1}
+    assert tent.pk not in _kit_items(updated)
+    assert list(GearItem.objects.filter(household=household).order_by("pk").values()) == gear_before
+    assert list(TripGear.objects.filter(trip=trip).order_by("pk").values()) == trip_before
+
+
+def test_update_gear_kit_rejects_invalid_payloads_without_partial_writes(
+    owner, household, other_household
+):
+    trip, tent, stove = _trip_with_gear(actor=owner, household=household)
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Base camp")
+    foreign = GearItem.objects.create(household=other_household, name="Not mine")
+
+    invalid_items = [
+        [(tent.pk, 0)],
+        [(tent.pk, -1)],
+        [(tent.pk, "2")],
+        [(tent.pk, 1), (tent.pk, 2)],
+        [],
+    ]
+    for items in invalid_items:
+        with pytest.raises(ValidationError):
+            update_gear_kit(actor=owner, kit_id=kit.pk, name="Renamed", items=items)
+
+    with pytest.raises(PermissionDenied):
+        update_gear_kit(actor=owner, kit_id=kit.pk, name="Renamed", items=[(foreign.pk, 1)])
+    with pytest.raises(PermissionDenied):
+        update_gear_kit(actor=owner, kit_id=kit.pk, name="Renamed", items=[(uuid.uuid4(), 1)])
+    with pytest.raises(ValidationError):
+        update_gear_kit(actor=owner, kit_id=kit.pk, name="Renamed", items=[("not-a-uuid", 1)])
+    with pytest.raises(ValidationError):
+        update_gear_kit(actor=owner, kit_id=kit.pk, name="   ", items=[(tent.pk, 1)])
+
+    kit.refresh_from_db()
+    assert kit.name == "Base camp"
+    assert _kit_items(kit) == {tent.pk: 2, stove.pk: 1}
+
+
+def test_update_gear_kit_rejects_another_kits_name(owner, household):
+    trip, tent, stove = _trip_with_gear(actor=owner, household=household)
+    first = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Base camp")
+    second = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Summit kit")
+
+    with pytest.raises(ValidationError):
+        update_gear_kit(actor=owner, kit_id=second.pk, name=" base CAMP ", items=[(tent.pk, 1)])
+
+    second.refresh_from_db()
+    assert second.name == "Summit kit"
+    assert _kit_items(second) == {tent.pk: 2, stove.pk: 1}
+    assert first.name == "Base camp"
+
+
+def test_delete_gear_kit_removes_membership_only(owner, household):
+    trip, _tent, _stove = _trip_with_gear(actor=owner, household=household)
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Base camp")
+    kept = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Spare kit")
+    gear_before = list(GearItem.objects.filter(household=household).order_by("pk").values())
+    trip_before = list(TripGear.objects.filter(trip=trip).order_by("pk").values())
+
+    delete_gear_kit(actor=owner, kit_id=kit.pk)
+
+    assert not GearKit.objects.filter(pk=kit.pk).exists()
+    assert not GearKitItem.objects.filter(kit_id=kit.pk).exists()
+    assert GearKit.objects.filter(pk=kept.pk).exists()
+    assert list(GearItem.objects.filter(household=household).order_by("pk").values()) == gear_before
+    assert list(TripGear.objects.filter(trip=trip).order_by("pk").values()) == trip_before
+
+
+def test_kit_lifecycle_requires_household_membership(owner, other_owner, household, other_household):
+    trip, tent, stove = _trip_with_gear(actor=owner, household=household)
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Base camp")
+
+    with pytest.raises(PermissionDenied):
+        create_gear_kit_from_trip(actor=other_owner, trip_id=trip.pk, name="Stolen")
+    with pytest.raises(PermissionDenied):
+        update_gear_kit(actor=other_owner, kit_id=kit.pk, name="Stolen", items=[(tent.pk, 1)])
+    with pytest.raises(PermissionDenied):
+        delete_gear_kit(actor=other_owner, kit_id=kit.pk)
+
+    kit.refresh_from_db()
+    assert kit.name == "Base camp"
+    assert _kit_items(kit) == {tent.pk: 2, stove.pk: 1}
+    with pytest.raises(GearKit.DoesNotExist):
+        update_gear_kit(actor=owner, kit_id=uuid.uuid4(), name="Missing", items=[(tent.pk, 1)])
+
+
+def test_gear_kit_item_constraints_protect_gear_and_quantities(owner, household, other_household):
+    trip, tent, stove = _trip_with_gear(actor=owner, household=household)
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Base camp")
+    foreign = GearItem.objects.create(household=other_household, name="Not mine")
+
+    cross_household = GearKitItem(kit=kit, gear_item=foreign, quantity=1)
+    with pytest.raises(ValidationError):
+        cross_household.full_clean()
+
+    zero = GearKitItem(kit=kit, gear_item=tent, quantity=0)
+    with pytest.raises(ValidationError):
+        zero.full_clean()
+    with pytest.raises(IntegrityError), transaction.atomic():
+        GearKitItem.objects.create(kit=kit, gear_item=tent, quantity=0)
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        GearKitItem.objects.create(kit=kit, gear_item=tent, quantity=1)
+
+    # This gear is referenced only by the kit, so protection cannot come from a trip row.
+    kit_only = GearItem.objects.create(household=household, name="Lantern", weight_grams=300)
+    update_gear_kit(
+        actor=owner,
+        kit_id=kit.pk,
+        name="Base camp",
+        items=[(tent.pk, 2), (stove.pk, 1), (kit_only.pk, 1)],
+    )
+    GearItem.objects.filter(pk=kit_only.pk).update(name="Lantern v2")
+    with pytest.raises(ProtectedError):
+        GearItem.objects.get(pk=kit_only.pk).delete()
+    assert GearKitItem.objects.filter(kit=kit, gear_item_id=kit_only.pk).exists()
+    assert GearItem.objects.get(pk=kit_only.pk).name == "Lantern v2"

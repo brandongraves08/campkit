@@ -3,6 +3,7 @@ import uuid
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 
@@ -56,3 +57,68 @@ class TripGear(models.Model):
             raise ValidationError("Packed gear must belong to the trip household.")
         if self.quantity < 1:
             raise ValidationError({"quantity": "Packed quantity must be at least one."})
+
+
+class HouseholdGearKitManager(models.Manager):
+    def for_household(self, household):
+        return self.get_queryset().filter(household=household)
+
+
+class GearKit(models.Model):
+    """A named, household-owned packing list that references shared gear.
+
+    A kit is a saved set of gear references and quantities; it never copies
+    gear metadata or provenance, and it never changes a trip or a GearItem.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    household = models.ForeignKey("households.Household", on_delete=models.CASCADE, related_name="gear_kits")
+    name = models.CharField(max_length=160)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_gear_kits")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = HouseholdGearKitManager()
+
+    class Meta:
+        ordering = ("name", "pk")
+        constraints = [
+            models.UniqueConstraint(
+                Lower("name"),
+                "household",
+                name="unique_gear_kit_name_per_household",
+                violation_error_message="A kit with this name already exists in this household.",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        self.name = " ".join((self.name or "").split())
+        if not self.name:
+            raise ValidationError({"name": "Kit name is required."})
+
+    def __str__(self):
+        return self.name
+
+
+class GearKitItem(models.Model):
+    kit = models.ForeignKey(GearKit, on_delete=models.CASCADE, related_name="items")
+    # Protected: deleting shared gear must not silently remove kit membership.
+    gear_item = models.ForeignKey("inventory.GearItem", on_delete=models.PROTECT, related_name="gear_kit_entries")
+    quantity = models.PositiveSmallIntegerField(default=1)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=("kit", "gear_item"), name="unique_gear_kit_item"),
+            models.CheckConstraint(condition=models.Q(quantity__gte=1), name="gear_kit_item_quantity_positive"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.kit_id and self.gear_item_id and self.kit.household_id != self.gear_item.household_id:
+            raise ValidationError("Kit gear must belong to the kit household.")
+        if self.quantity < 1:
+            raise ValidationError({"quantity": "Kit quantity must be at least one."})
+
+    def __str__(self):
+        return f"{self.gear_item} x{self.quantity}"
