@@ -324,6 +324,8 @@ def seed_trip_gear(*, actor, target_trip_id, source_kind, source_id, selections)
         actor=actor, target=target, source_kind=source_kind, source_id=source_id
     )
     wanted = _validated_seed_rows(selections, source_rows)
+    if any(gear.household_id != target.household_id for gear, _quantity in wanted.values()):
+        raise ValidationError("Seeded gear must belong to the trip household.")
     existing_gear_ids = set(
         TripGear.objects.select_for_update().filter(trip=target).values_list("gear_item_id", flat=True)
     )
@@ -334,8 +336,6 @@ def seed_trip_gear(*, actor, target_trip_id, source_kind, source_id, selections)
         if gear_id in existing_gear_ids:
             skipped += 1
             continue
-        if gear.household_id != target.household_id:
-            raise ValidationError("Seeded gear must belong to the trip household.")
         entry = TripGear(trip=target, gear_item=gear, quantity=quantity, packed=False)
         entry.full_clean()
         entry.save()

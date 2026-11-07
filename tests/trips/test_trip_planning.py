@@ -632,7 +632,7 @@ def test_seed_trip_gear_rejects_non_completed_and_unknown_source_kinds(owner, ho
     tent = _gear_item(household, "Tent")
     source = create_trip(actor=owner, household=household, data={"name": "Still planning"})
     entry = TripGear.objects.create(trip=source, gear_item=tent, quantity=2)
-    for status in (Trip.Status.PLANNED, Trip.Status.CONFIRMED):
+    for status in (Trip.Status.PLANNED, Trip.Status.CONFIRMED, Trip.Status.CANCELLED):
         _set_trip_status(source, status)
         with pytest.raises(ValidationError):
             trip_services.seed_trip_gear(
@@ -717,6 +717,15 @@ def test_seed_trip_gear_does_not_disclose_foreign_source_or_target_ids(
         )
     ) == expected_kit
 
+    expected_selected_row = _exception_signature(
+        lambda: trip_services.seed_trip_gear(
+            actor=owner,
+            target_trip_id=target.pk,
+            source_kind="kit",
+            source_id=kit.pk,
+            selections=[(uuid.uuid4(), 1)],
+        )
+    )
     for stale_row_id in (foreign_gear.pk, uuid.uuid4()):
         assert _exception_signature(
             lambda stale_row_id=stale_row_id: trip_services.seed_trip_gear(
@@ -726,10 +735,40 @@ def test_seed_trip_gear_does_not_disclose_foreign_source_or_target_ids(
                 source_id=kit.pk,
                 selections=[(stale_row_id, 1)],
             )
-        )[0] is ValidationError
+        ) == expected_selected_row
 
     assert not TripGear.objects.filter(trip=target).exists()
     assert TripGear.objects.filter(trip=foreign_trip).count() == len(foreign_trip_rows)
+
+
+def test_seed_trip_gear_validates_all_selected_gear_households_before_inserts(
+    owner, household, other_household, monkeypatch
+):
+    target = create_trip(actor=owner, household=household, data={"name": "New trip"})
+    own_gear = _gear_item(household, "Tent")
+    foreign_gear = _gear_item(other_household, "Foreign stove")
+    kit, _ = _kit_with_rows(actor=owner, household=household, entries=[(own_gear, 1)])
+    # Simulate corrupted/legacy ORM data that bypassed model validation.
+    foreign_row = GearKitItem.objects.create(kit=kit, gear_item=foreign_gear, quantity=1)
+    attempted_saves = []
+    original_save = TripGear.save
+
+    def recording_save(entry, *args, **kwargs):
+        attempted_saves.append(entry.gear_item_id)
+        return original_save(entry, *args, **kwargs)
+
+    monkeypatch.setattr(TripGear, "save", recording_save)
+    with pytest.raises(ValidationError):
+        trip_services.seed_trip_gear(
+            actor=owner,
+            target_trip_id=target.pk,
+            source_kind="kit",
+            source_id=kit.pk,
+            selections=[(own_gear.pk, 1), (foreign_row.pk, 1)],
+        )
+
+    assert attempted_saves == []
+    assert not TripGear.objects.filter(trip=target).exists()
 
 
 def test_seed_trip_gear_keeps_multi_household_sources_inside_the_target_household(
