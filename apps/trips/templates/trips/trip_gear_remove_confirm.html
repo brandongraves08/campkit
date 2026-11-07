@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Remove {{ entry.gear_item.name }} · CampKit{% endblock %}
+
+{% block content %}
+  <p><a href="{% url 'trips:trip_detail' trip.pk %}">← {{ trip.name }}</a></p>
+  <div class="page-head">
+    <h1>Remove {{ entry.gear_item.name }}?</h1>
+    <p class="lede">This removes only this item from {{ trip.name }}. Shared gear and other trips will stay unchanged.</p>
+  </div>
+  <div class="card">
+    <p>Quantity on this trip: {{ entry.quantity }}.</p>
+    <form method="post" action="{% url 'trips:trip_gear_remove' trip.pk entry.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="confirm" value="1">
+      <div class="button-row">
+        <button class="button button-danger" type="submit">Confirm removal</button>
+        <a class="button" href="{% url 'trips:trip_detail' trip.pk %}">Keep this item</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

@@ -2,7 +2,7 @@
 
 **A private planner for camping trips, shared gear, and pantry stock.** CampKit brings trip readiness and inventory together while keeping estimates visibly separate from facts a member has confirmed.
 
-> CampKit is an early, self-hosted project, not a public service. The internal deployment has passed disposable signup/login, invitation acceptance, and space-switching checks; an isolated backup-restore rehearsal also passed. Live trip/gear/pantry/meal creation was not separately tested. See [project status and limitations](#status-and-limitations) and the [deployment guide](deploy/README.md).
+> CampKit is an early, self-hosted project, not a public service. Reusable gear kits are now included in the private deployment (2026-11-07). They passed 369 automated tests, independent code review, and synthetic desktop/mobile browser QA. The screenshots below use synthetic local data and are not captures of the private deployment. Authenticated gear-kit behavior has not been exercised against real household data. See [project status and limitations](#status-and-limitations) and the [deployment guide](deploy/README.md).
 
 ## See CampKit
 
@@ -24,9 +24,26 @@ These are real browser captures of CampKit running locally against an isolated S
 
 *Uncertain intake stays in the review queue instead of silently becoming trusted stock.*
 
+### Reusable packing kits
+
+These current-branch screenshots use synthetic-only household, trip, and gear records; they were captured from the actual app at desktop and mobile sizes during the isolated browser QA. They are not screenshots of the private deployment.
+
+![Saved gear kits with a successful save message and referenced household gear](docs/screenshots/gear-kits.png)
+
+*Save a trip packing list as a reusable household kit, then edit or remove the kit without changing shared gear.*
+
+![Trip seeding with success and duplicate-skip feedback](docs/screenshots/gear-kit-seeding-desktop.png)
+
+*Copy selected gear to a planned trip; an existing trip row keeps its quantity and packed state.*
+
+![Mobile completed-trip seed form with quantities and the add action](docs/screenshots/gear-kit-seeding-mobile.png)
+
+*The seed form adapts to a narrow viewport and remains usable with ordinary vertical scrolling.*
+
 ## What you can do
 
 - **Plan trips:** record dates, destination, party size, and conditions; add shared gear and track packed items and readiness.
+- **Reuse packing lists:** save a trip’s current gear associations as a household kit, manage its name and item quantities, and seed a planned or confirmed trip from a kit or completed trip. Existing target rows stay unchanged; completed and cancelled packing history is read-only.
 - **Track gear and pantry items:** search and edit records, retain source/provenance, and see estimates separately from confirmed facts. Only confirmed pantry quantities are treated as guaranteed stock.
 - **Review intake:** submit a photo or barcode for optional provider-backed recognition. Candidates below confidence thresholds are held for member review; manual entry remains available when providers are not configured.
 - **Plan meals and stock reservations:** associate meals and ingredients with a trip, then confirm a meal plan to reserve available confirmed pantry stock.
@@ -86,7 +103,7 @@ The suite includes server-rendered UI/accessibility smoke tests, private-space i
 
 ## Status and limitations
 
-CampKit is an early, self-hosted tool, not a managed or public cloud product. You operate the application, database, secrets, reverse proxy, and backups. A live disposable flow through the internal deployment covered self-registration/login, invitation acceptance into a second private space, and space switching; the synthetic accounts and spaces were readback-verified as removed afterward. Live trip/gear/pantry/meal creation was not separately exercised. An isolated backup-restore rehearsal passed; see the [deployment verification record](deploy/README.md#verification-status-of-this-deployment). Case-insensitive login ambiguity and space switching are covered by automated regression tests; optional provider-backed integrations and other untested workflows still need separate validation. Provider-backed photo recognition, nutrition, and research depend on optional integrations and confidence thresholds; suggestions and unconfirmed records are not authoritative facts. Self-registration creates a private space owned by the registering account. Users join an existing space by accepting its owner's invitation and can switch among their memberships from the app header. There is no automatic purchasing, and the Hermes tool allowlist exposes no destructive bulk mutation.
+CampKit is an early, self-hosted tool, not a managed or public cloud product. You operate the application, database, secrets, reverse proxy, and backups. The internal deployment's earlier live checks covered synthetic signup/login, invitations, space switching, and trip/gear/pantry/meal flows. Reusable gear kits were privately deployed on 2026-11-07 after passing 369 automated tests, independent review, and synthetic browser QA at desktop and mobile sizes. Post-deploy checks confirmed the app and database are healthy, migrations are applied, and the kits route redirects unauthenticated users to login; no authenticated kit flow was run against real household data. The screenshots above are synthetic local UI captures, not production data. The earlier isolated backup rehearsal contained no media files, so it did not prove recovery of non-empty intake-photo storage. Optional provider-backed integrations and other untested workflows still need separate validation. Provider-backed photo recognition, nutrition, and research depend on optional integrations and confidence thresholds; suggestions and unconfirmed records are not authoritative facts. Self-registration creates a private space owned by the registering account. Users join an existing space by accepting its owner's invitation and can switch among their memberships from the app header. There is no automatic purchasing, and the Hermes tool allowlist exposes no destructive bulk mutation.
 
 Before using real user data, read the [deployment guide](deploy/README.md), configure a trusted private ingress and durable backups, and independently verify the deployment on your own host.
 

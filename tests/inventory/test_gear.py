@@ -58,6 +58,41 @@ def test_gear_delete_is_household_scoped_and_audited(owner, household, gear_data
     assert change.after is None
 
 
+@pytest.mark.parametrize("references", ["trip", "kit", "both"])
+@pytest.mark.django_db
+def test_protected_gear_delete_feedback_preserves_rows_and_rolls_back_audit(
+    client, owner, household, gear_data, references
+):
+    from apps.audit.models import InventoryChange
+    from apps.trips.models import GearKitItem, TripGear
+    from apps.trips.services import create_gear_kit_from_trip, create_trip
+    from apps.trips.services import add_trip_gear
+
+    gear = create_gear_item(actor=owner, household=household, data=gear_data)
+    trip = create_trip(actor=owner, household=household, data={"name": "Protected references"})
+    add_trip_gear(trip_id=trip.pk, gear_item_id=gear.pk, quantity=1, actor=owner)
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Protected reference kit")
+    if references == "kit":
+        TripGear.objects.filter(trip=trip, gear_item=gear).delete()
+    if references == "trip":
+        GearKitItem.objects.filter(kit=kit, gear_item=gear).delete()
+    audit_before = list(InventoryChange.objects.filter(object_id=str(gear.pk)).values_list("action", "before", "after"))
+
+    client.force_login(owner)
+    response = client.post(reverse("inventory:gear_delete", args=[gear.pk]))
+    assert response.status_code == 302
+    page = client.get(response["Location"])
+    assert b"trip or saved kit" in page.content
+    assert f"{gear.name} cannot be deleted".encode() in page.content
+    assert reverse("trips:trip_list").encode() in page.content
+    assert reverse("trips:gear_kit_list").encode() in page.content
+    assert b'role="alert"' in page.content
+    assert GearItem.objects.filter(pk=gear.pk).exists()
+    assert list(InventoryChange.objects.filter(object_id=str(gear.pk)).values_list("action", "before", "after")) == audit_before
+    assert TripGear.objects.filter(trip=trip, gear_item=gear).exists() == (references in {"trip", "both"})
+    assert GearKitItem.objects.filter(kit=kit, gear_item=gear).exists() == (references in {"kit", "both"})
+
+
 @pytest.mark.django_db
 def test_nonmember_cannot_read_another_households_weight_totals(owner, other_owner, household, other_household, gear_data):
     create_gear_item(actor=other_owner, household=other_household,

@@ -425,6 +425,17 @@ def test_trip_confirm_and_complete_workflow_uses_existing_status_service(client,
 
 
 @pytest.mark.django_db
+def test_saved_kit_management_has_an_actionable_empty_state_and_household_navigation(client, owner, household):
+    client.force_login(owner)
+    response = client.get(reverse("trips:gear_kit_list"))
+    assert response.status_code == 200
+    assert b"Saved gear kits" in response.content
+    assert b"No saved kits yet" in response.content
+    assert b"Find a trip" in response.content
+    assert b"aria-current=\"page\"" in response.content
+
+
+@pytest.mark.django_db
 def test_unknown_gear_id_is_a_form_error_not_a_server_error(client, owner, household, trip_data):
     """Regression for the deferred Task 3 finding: unknown gear id must not 500."""
     trip = create_trip(actor=owner, household=household, data=trip_data)

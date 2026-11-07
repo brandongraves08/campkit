@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Start {{ trip.name }} from a source · CampKit{% endblock %}
+
+{% block content %}
+  <p><a href="{% url 'trips:trip_detail' trip.pk %}">← {{ trip.name }}</a></p>
+  <div class="page-head">
+    <h1>Start from a kit or past trip</h1>
+    <p class="lede">Choose household gear for {{ trip.name }}. New entries start not packed; shared gear and source lists stay unchanged.</p>
+  </div>
+  {% if not has_sources %}
+    <div class="card empty-state">
+      <p>No saved kits or completed trips are available yet.</p>
+      <p>Save a trip with gear as a reusable kit, or complete a trip first.</p>
+      <p><a class="button button-primary" href="{% url 'trips:trip_list' %}">Save a trip with gear</a></p>
+    </div>
+  {% else %}
+    <form class="card" method="post">
+      {% csrf_token %}
+      {{ form.source_snapshot }}
+      {% if form.non_field_errors %}<div role="alert" class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+      {% if source_changed %}<p role="alert">The source changed; <a href="?source_kind={{ form.source_kind.value|urlencode }}&amp;source_id={{ form.source_id.value|urlencode }}">refresh and try again</a>.</p>{% endif %}
+      {% if source_unavailable %}<p role="alert">That source is no longer available. Refresh the page and choose a current source.</p>{% endif %}
+      <div class="field">
+        {{ form.source_kind.label_tag }}{{ form.source_kind }}{{ form.source_kind.errors }}
+      </div>
+      <div class="field">
+        {{ form.source_id.label_tag }}{{ form.source_id }}{{ form.source_id.errors }}
+      </div>
+      {% if source_selected %}
+        <fieldset>
+          <legend>Gear to add</legend>
+          {% if source_rows %}
+            <ul class="item-list">
+              {% for row in seed_rows %}
+                <li>
+                  <div class="seed-row">
+                    <label for="include-{{ row.gear.pk }}">{{ row.include }} <span>{{ row.gear.name }}</span></label>
+                    <label for="quantity-{{ row.gear.pk }}">Quantity for {{ row.gear.name }} {{ row.quantity }}</label>
+                  </div>
+                  {{ row.include.errors }}{{ row.quantity.errors }}
+                  {% include "partials/verification_badge.html" with status=row.gear.verification_status %}
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="empty-state">This source has no gear rows to select.</p>
+          {% endif %}
+        </fieldset>
+        {% for field in form %}{% if field.errors %}<div role="alert" class="form-errors">{{ field.errors }}</div>{% endif %}{% endfor %}
+        {% if source_rows %}<div class="button-row"><button class="button button-primary" type="submit">Add selected gear</button></div>{% endif %}
+      {% else %}
+        <div class="button-row"><button class="button" type="submit" name="choose_source" value="1">Choose source</button></div>
+      {% endif %}
+    </form>
+  {% endif %}
+{% endblock %}

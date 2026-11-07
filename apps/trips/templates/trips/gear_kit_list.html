@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Saved kits · CampKit{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <h1>Saved gear kits</h1>
+    <p class="lede">Reusable household packing lists reference shared gear without changing inventory or trip records.</p>
+  </div>
+  <p><a class="button" href="{% url 'trips:trip_list' %}">View trips</a></p>
+  {% if kits %}
+    <ul class="item-list">
+      {% for kit in kits %}
+        <li>
+          <div class="item-head">
+            <h2>{{ kit.name }}</h2>
+            <span class="tag">{{ kit.items.count }} item{{ kit.items.count|pluralize }}</span>
+          </div>
+          <ul class="kit-item-list">
+            {% for item in kit.items.all %}
+              <li>{{ item.gear_item.name }} × {{ item.quantity }}</li>
+            {% endfor %}
+          </ul>
+          <div class="actions">
+            <a class="button button-primary" href="{% url 'trips:gear_kit_edit' kit.pk %}">Edit kit</a>
+            <form class="inline-form" method="post" action="{% url 'trips:gear_kit_delete' kit.pk %}" data-confirm="Delete {{ kit.name }}? Shared gear and trip packing lists will stay unchanged.">
+              {% csrf_token %}
+              <button class="button button-danger" type="submit">Delete kit</button>
+            </form>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="empty-state">No saved kits yet. Open a trip with a packing list and save it as a reusable kit.</p>
+    <a class="button button-primary" href="{% url 'trips:trip_list' %}">Find a trip</a>
+  {% endif %}
+{% endblock %}

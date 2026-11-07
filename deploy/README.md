@@ -193,6 +193,12 @@ docker compose ps
 `campkit_data` and `postgres_data` are untouched by a rebuild. Take a backup
 before an upgrade that includes migrations.
 
+### Reusable gear kits
+
+The reusable-kit feature adds household-owned packing lists that reference existing shared gear. A member can seed a planned or confirmed trip from a kit or completed trip; duplicate target rows are left unchanged, new rows start unpacked, and completed/cancelled trip history remains read-only. The feature adds no REST or MCP endpoint. It was privately deployed on 2026-11-07. The release tree passed 369 automated tests, independent review, and synthetic desktop/mobile browser QA; production checks passed. Post-deployment readback confirmed `trips.0002_gearkit` applied, both containers healthy, login HTTP 200, static CSS HTTP 200, and `/trips/kits/` returning 302 to login. No authenticated feature flow was exercised against real household data.
+
+Use the normal paired database/media backup before future schema upgrades. The pre-deploy backup for this rollout passed checksum, dump-signature, and gzip validation; it contained no private media files, so it does not prove recovery of non-empty intake-photo data. The migration is additive. For code rollback, restore the previous application code and rebuild; do not reverse `trips.0002_gearkit` after kits may have been created, because that would drop their data.
+
 ## Verification status of this deployment
 
 Deployment checks were performed on 2026-11-03; the isolated restore rehearsal used a 2026-11-02 backup. Evidence and remaining gaps:
@@ -201,12 +207,13 @@ Deployment checks were performed on 2026-11-03; the isolated restore rehearsal u
 | --- | --- | --- |
 | Local automated checks | **passed** | Full pytest suite: 236 passed; Django system check under test settings and `git diff --check` passed |
 | HTTPS login/signup pages | **passed** | The live internal route returned HTTP 200 |
-| Disposable self-registration/login, invitation acceptance, and space switching | **passed** | Exercised over internal HTTPS; synthetic users and spaces were readback-verified removed. Live trip/gear/pantry/meal creation was not separately exercised |
+| Disposable self-registration/login, invitation acceptance, and space switching | **passed** | Exercised over internal HTTPS; synthetic users and spaces were readback-verified removed |
+| Live synthetic trip/gear/pantry/meal create flows | **passed** | Recorded for the deployed revision; synthetic records were cleaned up and absence read back. The reusable gear-kit feature in this branch was not part of that live test |
 | Case-insensitive login ambiguity and space-selection regressions | **passed** | Covered by automated tests; not claimed as a live mixed-case login check |
-| Isolated backup-restore rehearsal | **passed** | Backup passed SHA-256 and gzip checks; PostgreSQL restore in an isolated stack matched table row counts. The media archive restored without files; no production records were modified |
+| Isolated backup-restore rehearsal | **passed with media limitation** | Backup passed SHA-256 and gzip checks; PostgreSQL restore in an isolated stack matched table row counts. The media archive restored with zero files because that backup contained no private uploads; intake-photo restoration is not proven |
 | Deployment-backed MCP smoke call and optional external-provider integrations | **not run** | These integrations were outside the live app-flow check and need separate verification before use |
 
-Local tests and checks do not substitute for separate live verification of optional integrations or workflows outside the exercised paths.
+Local tests and checks do not substitute for separate live verification of optional integrations or workflows outside the exercised paths. This table records the 2026-11-03 deployed revision and predates the reusable-kit deployment. The gear-kit rollout and its current readback are recorded above; no authenticated feature flow was tested with real household data. See the feature overview and current-branch screenshots in the [project README](../README.md).
 
 ## Security notes
 
