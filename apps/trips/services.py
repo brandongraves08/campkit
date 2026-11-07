@@ -43,7 +43,7 @@ def add_trip_gear(*, trip_id, gear_item_id, quantity, actor):
 
 
 def _normalized_kit_name(name):
-    normalized = " ".join(str(name or "").split())
+    normalized = str(name or "").strip()
     if not normalized:
         raise ValidationError({"name": "Kit name is required."})
     if len(normalized) > 160:
@@ -51,9 +51,38 @@ def _normalized_kit_name(name):
     return normalized
 
 
+_DUPLICATE_KIT_NAME_MESSAGE = "A kit with this name already exists in this household."
+_DUPLICATE_KIT_NAME_CONSTRAINT = "unique_gear_kit_name_per_household"
+
+
+def _save_kit(kit, *, update_fields=None):
+    """Save only the kit row, translating only its own name-collision error.
+
+    Item writes run outside this helper: an integrity failure there is not a
+    duplicate kit name and must not be reported to the user as one.
+    """
+    try:
+        with transaction.atomic():
+            if update_fields is None:
+                kit.save()
+            else:
+                kit.save(update_fields=update_fields)
+    except IntegrityError as exc:
+        if _DUPLICATE_KIT_NAME_CONSTRAINT not in str(exc):
+            raise
+        raise ValidationError({"name": _DUPLICATE_KIT_NAME_MESSAGE}) from exc
+    return kit
+
+
 def _kit_for_actor(*, kit_id, actor, lock=False):
-    """Resolve one kit and require membership; never leak another household's kit."""
-    kits = GearKit.objects.all()
+    """Resolve one kit through the actor's memberships.
+
+    A foreign kit and an unknown kit fail identically, so an identifier never
+    discloses another household's kit.
+    """
+    if actor is None or not getattr(actor, "is_authenticated", False):
+        raise GearKit.DoesNotExist("Gear kit not found.")
+    kits = GearKit.objects.filter(household__memberships__user=actor)
     if lock:
         kits = kits.select_for_update()
     try:
@@ -62,8 +91,23 @@ def _kit_for_actor(*, kit_id, actor, lock=False):
         kit = None
     if kit is None:
         raise GearKit.DoesNotExist("Gear kit not found.")
-    require_household_member(actor, kit.household_id)
     return kit
+
+
+def _trip_for_kit_actor(*, trip_id, actor, lock=False):
+    """Membership-scoped trip lookup for kit creation (foreign == unknown)."""
+    if actor is None or not getattr(actor, "is_authenticated", False):
+        raise Trip.DoesNotExist("Trip not found.")
+    trips = Trip.objects.filter(household__memberships__user=actor)
+    if lock:
+        trips = trips.select_for_update()
+    try:
+        trip = trips.filter(pk=trip_id).first()
+    except (TypeError, ValueError, ValidationError):
+        trip = None
+    if trip is None:
+        raise Trip.DoesNotExist("Trip not found.")
+    return trip
 
 
 def list_gear_kits(*, actor, household):
@@ -114,25 +158,22 @@ def _validated_kit_items(*, actor, kit, items):
 @transaction.atomic
 def create_gear_kit_from_trip(*, actor, trip_id, name):
     """Snapshot a non-empty trip's gear rows into a named household kit."""
-    trip = get_trip_for_actor(trip_id, actor, lock=True)
+    trip = _trip_for_kit_actor(trip_id=trip_id, actor=actor, lock=True)
     name = _normalized_kit_name(name)
     rows = list(TripGear.objects.filter(trip=trip).select_related("gear_item").order_by("pk"))
     if not rows:
         raise ValidationError("A kit needs at least one gear item.")
     if GearKit.objects.for_household(trip.household).filter(name__iexact=name).exists():
-        raise ValidationError({"name": "A kit with this name already exists in this household."})
+        raise ValidationError({"name": _DUPLICATE_KIT_NAME_MESSAGE})
 
-    try:
-        with transaction.atomic():
-            kit = GearKit(household=trip.household, created_by=actor, name=name)
-            kit.full_clean()
-            kit.save()
-            for row in rows:
-                item = GearKitItem(kit=kit, gear_item=row.gear_item, quantity=row.quantity)
-                item.full_clean()
-                item.save()
-    except IntegrityError as exc:
-        raise ValidationError({"name": "A kit with this name already exists in this household."}) from exc
+    with transaction.atomic():
+        kit = GearKit(household=trip.household, created_by=actor, name=name)
+        kit.full_clean()
+        _save_kit(kit)
+        for row in rows:
+            item = GearKitItem(kit=kit, gear_item=row.gear_item, quantity=row.quantity)
+            item.full_clean()
+            item.save()
     return kit
 
 
@@ -148,19 +189,16 @@ def update_gear_kit(*, actor, kit_id, name, items):
         .exclude(pk=kit.pk)
         .exists()
     ):
-        raise ValidationError({"name": "A kit with this name already exists in this household."})
+        raise ValidationError({"name": _DUPLICATE_KIT_NAME_MESSAGE})
 
-    try:
-        with transaction.atomic():
-            kit.name = name
-            kit.full_clean()
-            kit.save(update_fields=["name", "updated_at"])
-            GearKitItem.objects.filter(kit=kit).delete()
-            GearKitItem.objects.bulk_create(
-                [GearKitItem(kit=kit, gear_item=gear, quantity=quantity) for gear, quantity in replacement]
-            )
-    except IntegrityError as exc:
-        raise ValidationError({"name": "A kit with this name already exists in this household."}) from exc
+    with transaction.atomic():
+        kit.name = name
+        kit.full_clean()
+        _save_kit(kit, update_fields=["name", "updated_at"])
+        GearKitItem.objects.filter(kit=kit).delete()
+        GearKitItem.objects.bulk_create(
+            [GearKitItem(kit=kit, gear_item=gear, quantity=quantity) for gear, quantity in replacement]
+        )
     return kit
 
 

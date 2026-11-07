@@ -3,7 +3,7 @@ import uuid
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models.functions import Lower
+from django.db.models.functions import Lower, Trim
 from django.utils import timezone
 
 
@@ -84,7 +84,7 @@ class GearKit(models.Model):
         ordering = ("name", "pk")
         constraints = [
             models.UniqueConstraint(
-                Lower("name"),
+                Lower(Trim("name")),
                 "household",
                 name="unique_gear_kit_name_per_household",
                 violation_error_message="A kit with this name already exists in this household.",
@@ -93,7 +93,7 @@ class GearKit(models.Model):
 
     def clean(self):
         super().clean()
-        self.name = " ".join((self.name or "").split())
+        self.name = (self.name or "").strip()
         if not self.name:
             raise ValidationError({"name": "Kit name is required."})
 

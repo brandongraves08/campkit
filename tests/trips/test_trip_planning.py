@@ -36,6 +36,14 @@ def _kit_items(kit):
     return {item.gear_item_id: item.quantity for item in kit.items.all()}
 
 
+def _exception_signature(call):
+    try:
+        call()
+    except Exception as exc:  # noqa: BLE001 - the signature is the assertion
+        return type(exc), str(exc)
+    raise AssertionError("expected the call to raise")
+
+
 def test_trip_lifecycle_is_household_scoped(owner, other_owner, household, other_household):
     trip = create_trip(actor=owner, household=household, data={"name": "Pine weekend"})
     assert trip.status == Trip.Status.PLANNED
@@ -170,6 +178,23 @@ def test_gear_kit_name_uniqueness_is_enforced_by_the_database(owner, household):
         GearKit.objects.create(household=household, created_by=owner, name="BASE CAMP")
 
 
+def test_gear_kit_name_uniqueness_trims_in_the_database(
+    owner, other_owner, household, other_household
+):
+    """Direct ORM writes cannot smuggle around the trimmed-name contract."""
+
+    trip, _tent, _stove = _trip_with_gear(actor=owner, household=household)
+    create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Base Camp")
+
+    for padded in (" Base Camp ", "  base camp  "):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            GearKit.objects.create(household=household, created_by=owner, name=padded)
+
+    other = GearKit.objects.create(household=other_household, created_by=other_owner, name=" Base Camp ")
+    assert other.household_id == other_household.pk
+    assert GearKit.objects.filter(household=household).count() == 1
+
+
 def test_list_gear_kits_is_household_scoped(owner, member, other_owner, household, other_household):
     trip, _tent, _stove = _trip_with_gear(actor=owner, household=household)
     other_trip, _other_tent, _other_stove = _trip_with_gear(
@@ -267,15 +292,17 @@ def test_delete_gear_kit_removes_membership_only(owner, household):
     assert list(TripGear.objects.filter(trip=trip).order_by("pk").values()) == trip_before
 
 
-def test_kit_lifecycle_requires_household_membership(owner, other_owner, household, other_household):
+def test_kit_lifecycle_rejects_nonmembers_as_not_found(owner, other_owner, household, other_household):
+    """A nonmember sees the same not-found outcome as a random id (no existence leak)."""
+
     trip, tent, stove = _trip_with_gear(actor=owner, household=household)
     kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Base camp")
 
-    with pytest.raises(PermissionDenied):
+    with pytest.raises(Trip.DoesNotExist):
         create_gear_kit_from_trip(actor=other_owner, trip_id=trip.pk, name="Stolen")
-    with pytest.raises(PermissionDenied):
+    with pytest.raises(GearKit.DoesNotExist):
         update_gear_kit(actor=other_owner, kit_id=kit.pk, name="Stolen", items=[(tent.pk, 1)])
-    with pytest.raises(PermissionDenied):
+    with pytest.raises(GearKit.DoesNotExist):
         delete_gear_kit(actor=other_owner, kit_id=kit.pk)
 
     kit.refresh_from_db()
@@ -283,6 +310,104 @@ def test_kit_lifecycle_requires_household_membership(owner, other_owner, househo
     assert _kit_items(kit) == {tent.pk: 2, stove.pk: 1}
     with pytest.raises(GearKit.DoesNotExist):
         update_gear_kit(actor=owner, kit_id=uuid.uuid4(), name="Missing", items=[(tent.pk, 1)])
+
+
+def test_kit_identifiers_do_not_disclose_foreign_households(owner, other_owner, household, other_household):
+    """Update and delete of a foreign kit look exactly like an unknown id, with no writes."""
+
+    trip, tent, stove = _trip_with_gear(actor=owner, household=household)
+    own_kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Own kit")
+    other_trip, other_tent, other_stove = _trip_with_gear(
+        actor=other_owner, household=other_household, trip_name="Other trip"
+    )
+    foreign_kit = create_gear_kit_from_trip(actor=other_owner, trip_id=other_trip.pk, name="Foreign kit")
+    unknown_id = uuid.uuid4()
+
+    actions = (
+        lambda kit_id: update_gear_kit(actor=owner, kit_id=kit_id, name="Renamed", items=[(tent.pk, 1)]),
+        lambda kit_id: delete_gear_kit(actor=owner, kit_id=kit_id),
+    )
+    expected = (GearKit.DoesNotExist, "Gear kit not found.")
+    for action in actions:
+        assert _exception_signature(lambda: action(foreign_kit.pk)) == expected
+        assert _exception_signature(lambda: action(unknown_id)) == expected
+
+    foreign_kit.refresh_from_db()
+    assert foreign_kit.name == "Foreign kit"
+    assert _kit_items(foreign_kit) == {other_tent.pk: 2, other_stove.pk: 1}
+    own_kit.refresh_from_db()
+    assert own_kit.name == "Own kit"
+    assert _kit_items(own_kit) == {tent.pk: 2, stove.pk: 1}
+    assert GearKit.objects.filter(household=other_household).count() == 1
+
+
+def test_create_kit_from_trip_does_not_disclose_foreign_trips(
+    owner, other_owner, household, other_household
+):
+    """A foreign trip id and an unknown id fail identically and write nothing."""
+
+    foreign_trip, _tent, _stove = _trip_with_gear(
+        actor=other_owner, household=other_household, trip_name="Other trip"
+    )
+    kits_before = GearKit.objects.count()
+    items_before = GearKitItem.objects.count()
+    expected = (Trip.DoesNotExist, "Trip not found.")
+
+    assert (
+        _exception_signature(
+            lambda: create_gear_kit_from_trip(actor=owner, trip_id=foreign_trip.pk, name="Sneaky kit")
+        )
+        == expected
+    )
+    assert (
+        _exception_signature(
+            lambda: create_gear_kit_from_trip(actor=owner, trip_id=uuid.uuid4(), name="Sneaky kit")
+        )
+        == expected
+    )
+    assert GearKit.objects.count() == kits_before
+    assert GearKitItem.objects.count() == items_before
+
+
+def test_update_does_not_mislabel_item_integrity_failures_as_name_collisions(
+    owner, household, monkeypatch
+):
+    """Only the kit row's own name collision is a form error; item DB errors surface."""
+
+    trip, tent, stove = _trip_with_gear(actor=owner, household=household)
+    kit = create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Base camp")
+
+    # Bypass payload validation to force a real UNIQUE(kit, gear_item) failure.
+    monkeypatch.setattr(
+        "apps.trips.services._validated_kit_items",
+        lambda *, actor, kit, items: [(tent, 1), (tent, 1)],
+    )
+
+    with pytest.raises(IntegrityError):
+        update_gear_kit(actor=owner, kit_id=kit.pk, name="Renamed", items=[])
+
+    kit.refresh_from_db()
+    assert kit.name == "Base camp"
+    assert _kit_items(kit) == {tent.pk: 2, stove.pk: 1}
+
+
+def test_kit_row_save_translates_only_its_own_name_collision(owner, household):
+    """The kit-row save helper classifies real DB errors, not every IntegrityError."""
+
+    from apps.trips.services import _save_kit
+
+    trip, _tent, _stove = _trip_with_gear(actor=owner, household=household)
+    create_gear_kit_from_trip(actor=owner, trip_id=trip.pk, name="Base Camp")
+
+    colliding = GearKit(household=household, created_by=owner, name=" base camp ")
+    with pytest.raises(ValidationError) as excinfo:
+        _save_kit(colliding)
+    assert "already exists" in str(excinfo.value)
+
+    broken = GearKit(household=household, created_by=owner, name=None)
+    with pytest.raises(IntegrityError):
+        _save_kit(broken)
+    assert not GearKit.objects.filter(name=None).exists()
 
 
 def test_gear_kit_item_constraints_protect_gear_and_quantities(owner, household, other_household):
