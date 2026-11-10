@@ -128,6 +128,20 @@ Django does not serve static files when `DEBUG=false`; the proxy must serve
 `/static/` from the collected volume. That proxy configuration is operator
 territory and is not shipped here.
 
+## Native mobile API
+
+The native client API is available only on the private LAN/VPN HTTPS origin
+served by this reverse proxy; it is not intended for public exposure. Configure
+the client with that origin plus `/api/mobile/v1/` and use the existing member
+browser login with OAuth authorization code + PKCE (`S256`). The provider scope
+is `mobile:packing`; the registered callback and endpoint/data/error contract
+are documented in [the mobile API contract](../docs/mobile-api-contract.md).
+
+This repository does not provision the OAuth Application/client record, ship a
+mobile app, or include a production deployment. Do not send bearer tokens over
+plaintext HTTP. The existing `/api/v1/`, web and MCP interfaces are separate
+contracts and are not replaced by these mobile routes.
+
 ## Backup
 
 `deploy/backup.sh` writes one PostgreSQL custom-format dump and one gzip archive
