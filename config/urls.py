@@ -29,5 +29,6 @@ urlpatterns = [
     path("meals/", include("apps.meals.urls")),
     path("intake/", include("apps.intake.urls")),
     path("api/v1/", include("apps.api.urls")),
+    path("api/mobile/v1/", include("apps.mobile_api.urls")),
     path("o/", include("apps.mobile_api.oauth_urls", namespace="oauth2_provider")),
 ]

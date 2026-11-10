@@ -13,7 +13,7 @@ def authenticate_mobile_request(request):
     Return the access-token object on success and ``None`` for missing, invalid,
     revoked, or expired credentials. Callers must still check active Membership.
     """
-    valid, oauth_request = get_oauthlib_core().verify_request(request, scopes=[])
+    valid, oauth_request = get_oauthlib_core().verify_request(request, scopes=["mobile:packing"])
     if not valid:
         return None
     request.user = oauth_request.user
