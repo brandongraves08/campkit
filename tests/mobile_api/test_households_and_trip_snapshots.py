@@ -161,6 +161,44 @@ def test_invalid_credentials_share_401_and_do_not_write(member, mobile_app, toke
     assert (Household.objects.count(), Trip.objects.count(), GearItem.objects.count(), TripGear.objects.count()) == before
 
 
+@pytest.mark.parametrize("route", ["households", "trips", "packing"])
+def test_deactivated_user_cannot_read_mobile_resources_without_writes(member, token_factory, route):
+    household = _household("Camp", member)
+    trip = _trip(household, member)
+    gear = GearItem.objects.create(household=household, name="Tent", category="shelter")
+    TripGear.objects.create(trip=trip, gear_item=gear)
+    token_factory()
+    client = Client()
+    client.defaults["HTTP_AUTHORIZATION"] = "Bearer member-token"
+    paths = {
+        "households": f"{BASE}households/",
+        "trips": f"{BASE}households/{household.pk}/trips/",
+        "packing": f"{BASE}households/{household.pk}/trips/{trip.pk}/packing/",
+    }
+    member.is_active = False
+    member.save(update_fields=["is_active"])
+    before = (Household.objects.count(), Membership.objects.count(), Trip.objects.count(),
+              GearItem.objects.count(), TripGear.objects.count())
+
+    response = client.get(paths[route])
+
+    assert response.status_code == 401
+    assert response.json() == {"error": {"code": "unauthorized", "message": "Authentication required."}}
+    assert b"Camp" not in response.content and b"Weekend" not in response.content and b"Tent" not in response.content
+    assert (Household.objects.count(), Membership.objects.count(), Trip.objects.count(),
+            GearItem.objects.count(), TripGear.objects.count()) == before
+
+
+def test_active_user_can_read_authorized_mobile_household_routes(member, authed_client):
+    household = _household("Camp", member)
+    trip = _trip(household, member)
+
+    assert member.is_active is True
+    assert authed_client.get(f"{BASE}households/").status_code == 200
+    assert authed_client.get(f"{BASE}households/{household.pk}/trips/").status_code == 200
+    assert authed_client.get(f"{BASE}households/{household.pk}/trips/{trip.pk}/packing/").status_code == 200
+
+
 def test_revoked_membership_denies_household_trip_and_packing_reads(member, authed_client):
     household = _household("Camp", member)
     trip = _trip(household, member)
