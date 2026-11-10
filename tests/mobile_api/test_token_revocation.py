@@ -98,6 +98,8 @@ def test_refresh_token_rotates_and_invalidates_the_previous_token(user, oauth_ap
 
     assert replay.status_code == 400
     assert not AccessToken.objects.filter(pk=access_token.pk).exists()
+    rotated_refresh = RefreshToken.objects.get(token=payload["refresh_token"])
+    assert rotated_refresh.revoked is not None
     from django.test import RequestFactory
     from apps.mobile_api.auth import authenticate_mobile_request
 

@@ -24,9 +24,10 @@ Implemented the dedicated `/o/` OAuth routes for a public native member client. 
 
 ## Tests and actual results
 
-1. Test-first focused red runs: `.venv/bin/python -m pytest tests/mobile_api/test_oauth_pkce.py tests/mobile_api/test_token_revocation.py -q` first returned **2 failed, 18 passed in 14.97s**: it exposed missing authorization-scope rejection; the replay failure showed the synthetic refresh fixture had no `token_family`. After adding an assertion that the rotated access token is invalidated, `.venv/bin/python -m pytest tests/mobile_api/test_token_revocation.py::test_refresh_token_rotates_and_invalidates_the_previous_token -q` returned **1 failed in 4.21s** because that same fixture omitted the real provider family identifier. The production scope guard was added and the fixture was corrected to use a UUID family, matching provider-issued refresh chains.
-2. Final focused verification: `.venv/bin/python -m pytest tests/mobile_api/test_oauth_pkce.py tests/mobile_api/test_token_revocation.py -q` — **20 passed in 14.77s**.
-3. Full suite: `.venv/bin/python -m pytest -q` — **389 passed in 141.56s**.
+1. Initial test-first focused red run: `.venv/bin/python -m pytest tests/mobile_api/test_oauth_pkce.py tests/mobile_api/test_token_revocation.py -q` — **2 failed, 18 passed in 14.97s**: it exposed missing authorization-scope rejection; the replay failure showed the synthetic refresh fixture had no `token_family`. After adding an assertion that the rotated access token is invalidated, `.venv/bin/python -m pytest tests/mobile_api/test_token_revocation.py::test_refresh_token_rotates_and_invalidates_the_previous_token -q` returned **1 failed in 4.21s** because that same fixture omitted the real provider family identifier. The production scope guard was added and the fixture was corrected to use a UUID family, matching provider-issued refresh chains.
+2. Review follow-up: added an assertion that, after replay denial, the persisted rotated `payload["refresh_token"]` record itself has a non-null `revoked` timestamp. `.venv/bin/python -m pytest tests/mobile_api/test_token_revocation.py::test_refresh_token_rotates_and_invalidates_the_previous_token -q` — **1 passed in 3.94s** (successful first refresh control, then replay denial and family revocation confirmed).
+3. Final focused verification: `.venv/bin/python -m pytest tests/mobile_api/test_oauth_pkce.py tests/mobile_api/test_token_revocation.py -q` — **20 passed in 14.57s**.
+4. Full suite: `.venv/bin/python -m pytest -q` — **389 passed in 142.54s**.
 
 ## Acceptance rules → tests → result
 
@@ -36,7 +37,7 @@ Implemented the dedicated `/o/` OAuth routes for a public native member client. 
 - Runtime password/client-credentials rejection → `test_token_endpoint_rejects_unapproved_grant_types` → passed.
 - Valid OAuth bearer resolves to the Django member; unknown, expired, and revoked tokens return no principal without writes → `test_bearer_authentication_resolves_member_and_denies_invalid_credentials_without_writes` → passed (valid + 3 denial states).
 - Access expiry and revocation → `test_access_token_expiry_is_finite_and_oauth_provider_rejects_expired_token`, `test_revocation_endpoint_invalidates_access_token` → passed.
-- Refresh rotation, replay denial, and associated access-token family revocation → `test_refresh_token_rotates_and_invalidates_the_previous_token` → passed.
+- Refresh rotation, replay denial, and revocation of the rotated refresh token and its associated access-token family → `test_refresh_token_rotates_and_invalidates_the_previous_token` → passed (successful refresh control; replay returns 400; rotated refresh record has a revocation timestamp; access token is invalidated).
 - Actual `mobile:packing` token issuance and unrelated-scope refusal → `test_authorization_issues_mobile_scope_and_rejects_unregistered_scope` → passed.
 
 ## Remaining limitations
