@@ -97,6 +97,30 @@ def test_packing_write_rejects_invalid_member_credentials_without_mutation(
     assert _before(entry) == (False, 1)
 
 
+@pytest.mark.parametrize(("revoke_membership", "expected_status"), [(False, 200), (True, 404)])
+def test_packing_write_requires_active_membership_without_mutation_after_revocation(
+    member, authed_client, revoke_membership, expected_status
+):
+    household = _household("Camp", member)
+    trip, entry = _packing(household, member)
+    membership = Membership.objects.get(household=household, user=member)
+    if revoke_membership:
+        membership.delete()
+
+    response = authed_client.put(
+        _path(household, trip, entry), data=_payload(), content_type="application/json"
+    )
+
+    if revoke_membership:
+        assert response.status_code == expected_status
+        assert response.json() == {"error": {"code": "not_found", "message": "Not found."}}
+        assert _before(entry) == (False, 1)
+    else:
+        assert response.status_code == expected_status
+        assert response.json()["packed"] is True
+        assert _before(entry) == (True, 2)
+
+
 def test_new_operation_updates_state_once_and_same_request_replays_original_result(member, authed_client):
     household = _household("Camp", member)
     trip, entry = _packing(household, member)
