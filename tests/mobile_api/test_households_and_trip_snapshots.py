@@ -102,12 +102,12 @@ def test_trip_list_and_packing_snapshot_have_only_contract_fields(member, authed
     snapshot = authed_client.get(f"{BASE}households/{household.pk}/trips/{trip.pk}/packing/")
     assert snapshot.status_code == 200
     assert snapshot.json() == {"trip": {"id": str(trip.pk), "name": "Weekend"}, "packing": [{
-        "id": entry.pk, "packed": True, "quantity": 2,
+        "id": entry.pk, "packed": True, "quantity": 2, "version": 1,
         "gear": {"id": str(gear.pk), "name": "Tent", "category": "shelter"},
     }]}
     payload = str(snapshot.json()).lower()
     assert "meal" not in payload and "pantry" not in payload
-    assert "provenance" not in payload and "version" not in payload
+    assert "provenance" not in payload
     assert "owner" not in payload and "conditions" not in str(snapshot.json())
 
 

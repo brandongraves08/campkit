@@ -31,6 +31,7 @@ def packing_snapshot(*, trip, household):
                 "id": entry.pk,
                 "packed": entry.packed,
                 "quantity": entry.quantity,
+                "version": entry.version,
                 "gear": {
                     "id": str(entry.gear_item.pk),
                     "name": entry.gear_item.name,

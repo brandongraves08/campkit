@@ -12,4 +12,9 @@ urlpatterns = [
         views.trip_packing,
         name="trip_packing",
     ),
+    path(
+        "households/<str:household_id>/trips/<str:trip_id>/packing/<int:entry_id>/",
+        views.packing_sync,
+        name="packing_sync",
+    ),
 ]

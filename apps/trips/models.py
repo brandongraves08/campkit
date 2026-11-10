@@ -47,6 +47,7 @@ class TripGear(models.Model):
     gear_item = models.ForeignKey("inventory.GearItem", on_delete=models.PROTECT, related_name="trip_packing_entries")
     quantity = models.PositiveSmallIntegerField(default=1)
     packed = models.BooleanField(default=False)
+    version = models.PositiveBigIntegerField(default=1)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=("trip", "gear_item"), name="unique_trip_gear_item")]
