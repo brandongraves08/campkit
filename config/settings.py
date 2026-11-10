@@ -17,6 +17,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "oauth2_provider",
+    "apps.mobile_api.apps.MobileApiConfig",
     "apps.households.apps.HouseholdsConfig",
     "apps.audit.apps.AuditConfig",
     "apps.inventory.apps.InventoryConfig",
@@ -140,6 +142,31 @@ CAMPKIT_HERMES_NOTIFY_TIMEOUT = float(os.environ.get("CAMPKIT_HERMES_NOTIFY_TIME
 # The API/MCP adapter authenticates as one dedicated service identity so every
 # audit row is attributable to Hermes rather than to a household human.
 CAMPKIT_SERVICE_USERNAME = os.environ.get("CAMPKIT_SERVICE_USERNAME", "hermes")
+
+# Public native member OAuth client. Access tokens are short-lived; refresh
+# tokens rotate and replay revokes the token family. API views must still enforce
+# active household Membership independently of OAuth authentication.
+OAUTH2_PROVIDER = {
+    "OAUTH2_GRANT_TYPES_SUPPORTED": ["authorization_code", "refresh_token"],
+    "OAUTH2_RESPONSE_TYPES_SUPPORTED": ["code"],
+    "PKCE_REQUIRED": True,
+    "COMPLIANT_BCP_RFC9700_PKCE_METHOD": True,
+    "ALLOW_URI_WILDCARDS": False,
+    "ALLOWED_REDIRECT_URI_SCHEMES": ["com.graveystudios.campkit"],
+    "SCOPES": {"mobile:packing": "Mobile packing access"},
+    "DEFAULT_SCOPES": ["mobile:packing"],
+    "ACCESS_TOKEN_EXPIRE_SECONDS": 900,
+    "REFRESH_TOKEN_EXPIRE_SECONDS": 30 * 24 * 60 * 60,
+    "ROTATE_REFRESH_TOKEN": True,
+    "REFRESH_TOKEN_REUSE_PROTECTION": True,
+    "REFRESH_TOKEN_GRACE_PERIOD_SECONDS": 0,
+    "COMPLIANT_BCP_RFC9700_IMPLICIT_GRANT": True,
+    "COMPLIANT_BCP_RFC9700_PASSWORD_GRANT": True,
+    "COMPLIANT_BCP_RFC9700_REFRESH_TOKEN": True,
+    "COMPLIANT_BCP_RFC9700_REDIRECT_URI_SCHEME": True,
+    "COMPLIANT_BCP_RFC9700_REDIRECT_URI_MATCHING": True,
+    "COMPLIANT_BCP_RFC9700_PKCE_REQUIRED": True,
+}
 
 # Sourced enrichment providers are selected by dotted path (or an instance in
 # tests). Unset means the shipped null provider: no data, no fabrication, and no

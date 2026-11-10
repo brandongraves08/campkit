@@ -28,13 +28,13 @@ The dependency is now pinned in `pyproject.toml`. This is a provider verificatio
 | Scopes | PASS: settings-driven `SCOPES`, `DEFAULT_SCOPES`, and replaceable scope backend are documented; scope validation rejects requested scopes not offered by the backend. CampKit must configure least-privilege scopes and enforce authorization in API views. |
 | Strict redirect URI restrictions | PASS: exact URI matching; wildcards default off. Keep `ALLOW_URI_WILDCARDS=False`; register only exact approved callback URIs. |
 | Existing browser login compatibility | PASS at provider-level: authorization view uses Django `LoginRequiredMixin` and Django `LOGIN_URL`; CampKit has existing session/authentication middleware, `LOGIN_URL = "login"`, and the `login` named route points at `/accounts/login/`. This reuses the existing member's browser login session; no password grant is needed. Runtime end-to-end behavior is not claimed/tested in this provider-only task. |
-| No password grant | Provider supports an explicit `OAUTH2_GRANT_TYPES_SUPPORTED` allowlist. Its documented defaults include password and implicit, so follow-on integration must set an allowlist of only required grants (authorization code and refresh token), rather than relying on defaults. |
+| No password grant | The documentation's `OAUTH2_GRANT_TYPES_SUPPORTED` setting only controls advertised authorization-server metadata; it does not enforce runtime rejection. Enforce password/implicit denial through the RFC 9700 compliance gates and provision only the intended public authorization-code application; do not expose dynamic client registration or other application records. |
 
 ## Security boundary / follow-on decisions
 
 - OAuth access tokens identify Django member users. API access must additionally require an active `Membership` for the household being accessed; OAuth provider authentication does not establish household authorization.
 - Never use the Hermes service credential as an end-user OAuth member identity.
-- Limit enabled grants explicitly to `authorization_code` and `refresh_token`; exclude `password`, `implicit`, and `client_credentials`.
+- Provision only one public authorization-code client; apply the runtime grant restriction in the `/o/token/` view because `OAUTH2_GRANT_TYPES_SUPPORTED` only advertises server metadata. Runtime denial of password grants is enforced by `COMPLIANT_BCP_RFC9700_PASSWORD_GRANT=True`; implicit is denied by both the runtime gate and the authorization response-type restriction. Do not expose dynamic registration, client-credentials, or device-code flows.
 - Use public client registrations and PKCE; no client secret for a native public client.
 - Keep wildcard redirect support disabled and use exact, explicitly registered redirect URIs.
 - Use small explicit scopes; enable refresh replay protection; choose a finite refresh lifetime. If hashed token storage is enabled later, note documented incompatibility with nonzero refresh-token grace periods (leave grace at zero).
