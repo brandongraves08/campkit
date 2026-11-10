@@ -12,6 +12,10 @@ class MobileAuthorizationView(provider_views.AuthorizationView):
                 return JsonResponse({"error": "unsupported_response_type"}, status=400)
             if not request.GET.get("code_challenge") or request.GET.get("code_challenge_method") != "S256":
                 return JsonResponse({"error": "invalid_request"}, status=400)
+            from oauth2_provider.settings import oauth2_settings
+
+            if set(request.GET.get("scope", "").split()) - set(oauth2_settings.SCOPES):
+                return JsonResponse({"error": "invalid_scope"}, status=400)
         return super().dispatch(request, *args, **kwargs)
 
 

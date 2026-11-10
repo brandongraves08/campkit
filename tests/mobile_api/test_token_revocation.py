@@ -1,4 +1,5 @@
 from datetime import timedelta
+import uuid
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -75,8 +76,10 @@ def test_refresh_token_rotates_and_invalidates_the_previous_token(user, oauth_ap
         application=oauth_application,
         access_token=access_token,
         token="old-refresh-token",
+        token_family=uuid.uuid4(),
     )
-    response = Client().post("/o/token/", {
+    client = Client()
+    response = client.post("/o/token/", {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token.token,
         "client_id": oauth_application.client_id,
@@ -86,6 +89,22 @@ def test_refresh_token_rotates_and_invalidates_the_previous_token(user, oauth_ap
     assert payload["refresh_token"] != refresh_token.token
     refresh_token.refresh_from_db()
     assert refresh_token.revoked is not None
+
+    replay = client.post("/o/token/", {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token.token,
+        "client_id": oauth_application.client_id,
+    })
+
+    assert replay.status_code == 400
+    assert not AccessToken.objects.filter(pk=access_token.pk).exists()
+    from django.test import RequestFactory
+    from apps.mobile_api.auth import authenticate_mobile_request
+
+    replayed_access_request = RequestFactory().get(
+        "/api/v1/", HTTP_AUTHORIZATION=f"Bearer {payload['access_token']}"
+    )
+    assert authenticate_mobile_request(replayed_access_request) is None
 
 
 def test_mobile_tokens_cannot_receive_non_mobile_scope(user, oauth_application):

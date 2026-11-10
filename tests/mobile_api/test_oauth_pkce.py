@@ -71,12 +71,52 @@ def test_authorization_uses_existing_member_browser_login(oauth_application):
 
 
 def test_public_client_is_authorization_code_only_and_has_exact_callback(oauth_application):
-    from apps.mobile_api.auth import authenticate_mobile_request
-
-    assert callable(authenticate_mobile_request)
     assert oauth_application.client_type == "public"
     assert oauth_application.authorization_grant_type == "authorization-code"
     assert oauth_application.redirect_uris.split() == [CALLBACK]
+
+
+@pytest.mark.parametrize("credential_state", ["valid", "unknown", "expired", "revoked"])
+def test_bearer_authentication_resolves_member_and_denies_invalid_credentials_without_writes(
+    user, oauth_application, credential_state
+):
+    from datetime import timedelta
+    from django.test import RequestFactory
+    from django.utils import timezone
+    from oauth2_provider.models import AccessToken
+    from apps.mobile_api.auth import authenticate_mobile_request
+
+    if credential_state == "valid":
+        token_value = "valid-member-token"
+        token = AccessToken.objects.create(
+            user=user, application=oauth_application, token=token_value,
+            expires=timezone.now() + timedelta(minutes=10), scope=SCOPE,
+        )
+    elif credential_state == "unknown":
+        token_value = "unknown-member-token"
+    else:
+        token_value = f"{credential_state}-member-token"
+        token = AccessToken.objects.create(
+            user=user, application=oauth_application, token=token_value,
+            expires=(timezone.now() - timedelta(seconds=1) if credential_state == "expired"
+                     else timezone.now() + timedelta(minutes=10)),
+            scope=SCOPE,
+        )
+        if credential_state == "revoked":
+            token.delete()
+    request = RequestFactory().get("/api/v1/", HTTP_AUTHORIZATION=f"Bearer {token_value}")
+    before = AccessToken.objects.count()
+
+    authenticated_token = authenticate_mobile_request(request)
+
+    if credential_state == "valid":
+        assert authenticated_token == token
+        assert request.user.pk == user.pk
+        assert request.user.__class__ is user.__class__
+    else:
+        assert authenticated_token is None
+        assert not hasattr(request, "user") or request.user.is_anonymous
+        assert AccessToken.objects.count() == before
 
 
 @pytest.mark.parametrize("redirect_uri", ["com.graveystudios.campkit://oauth/callback.evil", "https://attacker.example/callback"])
@@ -111,3 +151,33 @@ def test_authorize_endpoint_rejects_implicit_response(oauth_application, user):
     client.force_login(user)
     response = client.get("/o/authorize/?" + urlencode(_authorize_params(oauth_application, response_type="token")))
     assert response.status_code == 400
+
+
+def test_authorization_issues_mobile_scope_and_rejects_unregistered_scope(oauth_application, user):
+    import base64
+    import hashlib
+
+    client = Client()
+    client.force_login(user)
+    verifier = "A" * 43
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    params = _authorize_params(oauth_application, code_challenge=challenge)
+
+    consent = client.get("/o/authorize/?" + urlencode(params))
+    assert consent.status_code == 200
+    approved = client.post("/o/authorize/", {**params, "allow": "Authorize"})
+    assert approved.status_code == 302
+    assert approved["Location"].startswith(CALLBACK + "?")
+    code = approved["Location"].split("code=", 1)[1].split("&", 1)[0]
+    issued = client.post("/o/token/", {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": CALLBACK,
+        "client_id": oauth_application.client_id,
+        "code_verifier": verifier,
+    })
+    assert issued.status_code == 200
+    assert issued.json()["scope"] == SCOPE
+
+    invalid = client.get("/o/authorize/?" + urlencode(_authorize_params(oauth_application, scope="write")))
+    assert invalid.status_code == 400
