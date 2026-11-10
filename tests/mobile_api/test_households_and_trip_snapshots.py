@@ -36,9 +36,9 @@ def mobile_app(member):
 
 @pytest.fixture
 def token_factory(member, mobile_app):
-    def create(*, scope=SCOPE, expires=None, token="member-token"):
+    def create(*, scope=SCOPE, expires=None, token="member-token", user=member):
         return AccessToken.objects.create(
-            user=member,
+            user=user,
             application=mobile_app,
             token=token,
             expires=expires or timezone.now() + timedelta(minutes=10),
@@ -177,6 +177,32 @@ def test_deactivated_user_cannot_read_mobile_resources_without_writes(member, to
     }
     member.is_active = False
     member.save(update_fields=["is_active"])
+    before = (Household.objects.count(), Membership.objects.count(), Trip.objects.count(),
+              GearItem.objects.count(), TripGear.objects.count())
+
+    response = client.get(paths[route])
+
+    assert response.status_code == 401
+    assert response.json() == {"error": {"code": "unauthorized", "message": "Authentication required."}}
+    assert b"Camp" not in response.content and b"Weekend" not in response.content and b"Tent" not in response.content
+    assert (Household.objects.count(), Membership.objects.count(), Trip.objects.count(),
+            GearItem.objects.count(), TripGear.objects.count()) == before
+
+
+@pytest.mark.parametrize("route", ["households", "trips", "packing"])
+def test_token_without_member_user_cannot_read_mobile_resources_without_writes(member, token_factory, route):
+    household = _household("Camp", member)
+    trip = _trip(household, member)
+    gear = GearItem.objects.create(household=household, name="Tent", category="shelter")
+    TripGear.objects.create(trip=trip, gear_item=gear)
+    token_factory(user=None)
+    client = Client()
+    client.defaults["HTTP_AUTHORIZATION"] = "Bearer member-token"
+    paths = {
+        "households": f"{BASE}households/",
+        "trips": f"{BASE}households/{household.pk}/trips/",
+        "packing": f"{BASE}households/{household.pk}/trips/{trip.pk}/packing/",
+    }
     before = (Household.objects.count(), Membership.objects.count(), Trip.objects.count(),
               GearItem.objects.count(), TripGear.objects.count())
 
