@@ -137,6 +137,19 @@ def test_new_operation_updates_state_once_and_same_request_replays_original_resu
     assert _before(entry) == (True, 2)
 
 
+def test_packing_write_succeeds_while_csrf_enforcement_is_active(member, token_factory):
+    token_factory()
+    household = _household("Camp", member)
+    trip, entry = _packing(household, member)
+    client = Client(enforce_csrf_checks=True)
+    client.defaults["HTTP_AUTHORIZATION"] = "Bearer sync-token"
+
+    response = client.put(_path(household, trip, entry), data=_payload(), content_type="application/json")
+
+    assert response.status_code == 200
+    assert _before(entry) == (True, 2)
+
+
 def test_same_operation_id_with_changed_payload_conflicts_without_mutation(member, authed_client):
     household = _household("Camp", member)
     trip, entry = _packing(household, member)

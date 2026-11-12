@@ -5,6 +5,7 @@ import uuid
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_http_methods
 
 from apps.mobile_api.models import PackingOperation
@@ -91,6 +92,7 @@ def trip_packing(request, household_id, trip_id):
     return JsonResponse(packing_snapshot(trip=trip, household=household))
 
 
+@csrf_exempt  # bearer-token native client: no session cookie, so CSRF adds nothing and blocks every write
 @require_http_methods(["PUT"])
 @authenticate_mobile
 @transaction.atomic
