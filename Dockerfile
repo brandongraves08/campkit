@@ -16,6 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # in place. Explicit setuptools discovery in pyproject.toml supports editable
 # developer/test installs without changing this runtime path.
 ARG DJANGO_VERSION=5.2.18
+ARG OAUTH_TOOLKIT_VERSION=3.4.1
 ARG PSYCOPG_VERSION=3.3.6
 ARG GUNICORN_VERSION=23.0.0
 
@@ -34,6 +35,7 @@ COPY deploy /app/deploy
 
 RUN pip install --no-cache-dir \
         "Django==${DJANGO_VERSION}" \
+        "django-oauth-toolkit==${OAUTH_TOOLKIT_VERSION}" \
         "psycopg[binary]==${PSYCOPG_VERSION}" \
         "gunicorn==${GUNICORN_VERSION}" \
     && mkdir -p /app/staticfiles /data/private/intake \
