@@ -28,6 +28,13 @@ class SeedResult:
     skipped: int
 
 
+class TripGearVersionConflict(Exception):
+    def __init__(self, *, packed, version):
+        self.packed = packed
+        self.version = version
+        super().__init__("Packing entry changed.")
+
+
 def _require_packing_mutable(trip):
     if trip.status in _READ_ONLY_TRIP_STATUSES:
         raise ValidationError(_READ_ONLY_PACKING_MESSAGE)
@@ -447,6 +454,34 @@ def packed_base_weight(*, trip_id, actor):
 
 
 @transaction.atomic
+def set_trip_gear_packed_versioned(*, trip_id, entry_id, packed, base_version, actor):
+    """Apply one desired packed state using a per-row optimistic version."""
+    if type(packed) is not bool:
+        raise ValidationError({"packed": "Packed must be a boolean."})
+    if isinstance(base_version, bool) or not isinstance(base_version, int) or base_version < 1:
+        raise ValidationError({"base_version": "Base version must be a positive integer."})
+
+    trip = _trip_for_member_actor(trip_id=trip_id, actor=actor, lock=True)
+    _require_packing_mutable(trip)
+    try:
+        entry = TripGear.objects.select_for_update().filter(trip=trip, pk=entry_id).first()
+    except (TypeError, ValueError, ValidationError):
+        entry = None
+    if entry is None:
+        raise TripGear.DoesNotExist("Trip gear not found.")
+    if entry.version != base_version:
+        raise TripGearVersionConflict(packed=entry.packed, version=entry.version)
+    if entry.packed == packed:
+        return entry, False
+
+    entry.packed = packed
+    entry.version += 1
+    entry.full_clean()
+    entry.save(update_fields=["packed", "version"])
+    return entry, True
+
+
+@transaction.atomic
 def set_trip_gear_packed(*, trip_id, entry_id, packed, actor):
     trip = _trip_for_member_actor(trip_id=trip_id, actor=actor, lock=True)
     _require_packing_mutable(trip)
@@ -456,9 +491,12 @@ def set_trip_gear_packed(*, trip_id, entry_id, packed, actor):
         entry = None
     if entry is None:
         raise TripGear.DoesNotExist("Trip gear not found.")
-    entry.packed = bool(packed)
-    entry.full_clean()
-    entry.save(update_fields=["packed"])
+    packed = bool(packed)
+    if entry.packed != packed:
+        entry.packed = packed
+        entry.version += 1
+        entry.full_clean()
+        entry.save(update_fields=["packed", "version"])
     return entry
 
 
